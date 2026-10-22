@@ -40,6 +40,9 @@ size_t book_store_file_limit(const book_store_root_t* root);
 uint64_t book_store_free_bytes(const book_store_root_t* root);
 /// 仅查询内置分区是否已挂载，不触发挂载。/ Inspect flash mount state without mounting.
 bool book_store_flash_ready(void);
+/// 按需挂载内置存储分区（幂等）；失败不影响可用 SD。卡组存储复用同一挂载。
+/// Mount the internal storage partition on demand (idempotent); failure leaves usable SD alone. Deck storage reuses this mount.
+esp_err_t book_store_ensure_flash(void);
 /// 仅删除已挂载书根内的直接 TXT/EPUB 普通文件，然后清对应进度及 last。
 /// Delete only a direct regular TXT/EPUB file in a mounted book root, then forget its progress and last path.
 /// 先清同名普通覆盖备份；仅有备份时先恢复再删除，失败不声称文件已删。

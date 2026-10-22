@@ -31,7 +31,7 @@ def check_archived_releases(folder: Path, current_partitions: Path | None = None
     versions = set()
     for release in catalog["releases"]:
         version = release["version"]
-        assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+)?", version)
+        assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version)
         assert version not in versions, "duplicate archived version"
         versions.add(version)
         assert re.fullmatch(r"[0-9a-f]{40}", release["source_commit"]), "missing release provenance"
@@ -120,7 +120,7 @@ def check(folder: Path) -> None:
     version = image[48:80].split(b"\0")[0].decode("ascii")
     project = image[80:112].split(b"\0")[0].decode("ascii")
     assert version == manifest["version"] and project == "Read_Pico", "base version mismatch"
-    assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+)?", version), "invalid release version"
+    assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version), "invalid release version"
     capability = manifest.get("pico_ota", {})
     assert capability.get("layout") == "pico-dual-4m-v1"
     assert capability.get("base_version") == version and capability.get("rollback") is True

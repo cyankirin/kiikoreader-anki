@@ -5,8 +5,21 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+（暂无 / None yet）
+
+
+## 0.3.3-rc99.01 / 2026-10-22
+
+- 基于 rc99 移植完整 Anki 功能：新增 Anki 卡组学习页，导入 TF 卡上的 .apkg（或裸 collection.anki2/anki21），在设备上翻面学习并记录复习进度；解析、渲染与调度有宿主测试覆盖。导入与学习均为文本卡片，图片与音频显示占位。
+  Port the full Anki feature onto rc99: an Anki study page imports .apkg (or a bare collection.anki2/anki21) from the TF card, flips through cards on device and records review progress; parsing, rendering and scheduling are covered by host tests. Text cards only; images and audio show placeholders.
+- 文件页可直接点开 .apkg：自动切到 Anki 页并导入该文件；Anki 页本身仍在右下角「功能」菜单第 6 项。完形（cloze）卡片按 Anki 语义修正：正面挖空当前序号、背面揭示答案，其余序号保留原文。
+  The file page now opens .apkg directly, switching to the Anki page and importing it; the page itself also sits in the bottom-right function menu. Cloze cards follow Anki semantics: the active index is blanked on the front and revealed on the back while others keep their text.
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 升级版本比较支持 rc 小修订（如 0.3.3-rc99.01），排序为 rc98 < rc98.1 < rc99 < rc99.01 < 正式版；仍拒绝截断、多级后缀与非数字后缀，旧版号与旧清单行为不变。
+  Update ordering accepts rc sub-revisions (e.g. 0.3.3-rc99.01) with rc98 < rc98.1 < rc99 < rc99.01 < stable; truncation, deeper suffixes and non-numeric suffixes stay rejected, and existing versions/manifests behave as before.
+- 延续 rc99 的功能、分区与数据格式，保留用户配置、原密码记录、阅读进度与已导入的 Anki 卡组。
+  Retain rc99 features, partition/data compatibility, user settings, saved credentials, reading progress and imported Anki decks.
 
 
 ## 0.3.3-rc99 / 2026-10-22
@@ -21,6 +34,21 @@ User-visible changes by release; see [README](../README.md) for usage.
   Clean the preceding screen on reader entry and fuse ordinary body/progress output while retaining calibrated gray transitions and prefetch.
 - 固件优先使用GitHub Pages OTA源，保留官网清单备用与下载校验；官网保留原rc98及更早正式版，继续提供USB全量包与TF完整应用升级包。
   Prefer GitHub Pages OTA with website metadata fallback and verification; retain original rc98/older web choices with USB base and complete TF application packages.
+
+## 0.3.3-rc98.1 / 2026-10-22
+
+- 新增 Anki 卡组学习页：导入 TF 卡上的 .apkg（或裸 collection.anki2/anki21），在设备上翻面学习并记录复习进度；解析、渲染与调度有宿主测试覆盖。导入与学习均为文本卡片，图片与音频显示占位。
+  Added an Anki study page: import .apkg (or a bare collection.anki2/anki21) from the TF card, flip through cards on device and record review progress; parsing, rendering and scheduling are covered by host tests. Text cards only; images and audio show placeholders.
+- 文件页可直接点开 .apkg：自动切到 Anki 页并导入该文件；Anki 页本身仍在右下角「功能」菜单第 6 项。完形（cloze）卡片按 Anki 语义修正：正面挖空当前序号、背面揭示答案，其余序号保留原文。
+  The file page now opens .apkg directly, switching to the Anki page and importing it; the page itself also sits in the bottom-right function menu. Cloze cards follow Anki semantics: the active index is blanked on the front and revealed on the back while others keep their text.
+- 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
+  Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 升级版本比较支持 rc 小修订（如 0.3.3-rc98.1），排序为 rc98 < rc98.1 < rc99 < 正式版；仍拒绝截断、多级后缀与非数字后缀，旧版号与旧清单行为不变。
+  Update ordering accepts rc sub-revisions (e.g. 0.3.3-rc98.1) with rc98 < rc98.1 < rc99 < stable; truncation, deeper suffixes and non-numeric suffixes stay rejected, and existing versions/manifests behave as before.
+- 延续 rc98 的功能、分区与数据格式，保留用户配置、原密码记录、阅读进度与已导入的 Anki 卡组。
+  Retain rc98 features, partition/data compatibility, user settings, saved credentials, reading progress and imported Anki decks.
+
+
 
 ## 0.3.3-rc98 / 2026-10-21
 

@@ -790,6 +790,11 @@ static void open_selected(app_ctx_t *ctx) {
     } else if (!strcasecmp(ext, ".jpg") || !strcasecmp(ext, ".jpeg") || !strcasecmp(ext, ".png")) {
         extern const app_desc_t app_image;
         if (app_image_request_open(s_selected.path)) ctx->request_app = &app_image;
+    } else if (!strcasecmp(ext, ".apkg")) {
+        // Anki 卡组包：交给 Anki 页导入。/ Anki deck package: hand it to the Anki page.
+        extern const app_desc_t app_anki;
+        if (app_anki_request_open(s_selected.path)) ctx->request_app = &app_anki;
+        else snprintf(s_message, sizeof(s_message), "没有可用的打开方式");
     } else if (!strcasecmp(ext, ".ttf") || !strcasecmp(ext, ".otf")) {
         if (ttf_font_open(s_selected.path) == ESP_OK) {
             app_settings_set_system_font_path(s_selected.path);
