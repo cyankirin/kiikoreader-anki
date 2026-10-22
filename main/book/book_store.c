@@ -55,21 +55,25 @@ static bool sd_ready(void) {
 }
 
 static esp_err_t flash_root(book_store_root_t* out) {
-    if (!book_store_flash_ready()) {
-        const esp_vfs_fat_mount_config_t config = {
-            .format_if_mount_failed = true,
-            .max_files = 4,
-            .allocation_unit_size = 4096,
-        };
-        esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
-        if (err != ESP_OK) {
-            s_wl = WL_INVALID_HANDLE;
-            ESP_LOGW(TAG, "flash mount: %s", esp_err_to_name(err));
-            return err;
-        }
-    }
-    esp_err_t err = ensure_dir("/flash/books");
+    esp_err_t err = book_store_ensure_flash();
+    if (err != ESP_OK) return err;
+    err = ensure_dir("/flash/books");
     if (err == ESP_OK) *out = (book_store_root_t){.path = "/flash/books", .is_flash = true};
+    return err;
+}
+
+esp_err_t book_store_ensure_flash(void) {
+    if (book_store_flash_ready()) return ESP_OK;
+    const esp_vfs_fat_mount_config_t config = {
+        .format_if_mount_failed = true,
+        .max_files = 4,
+        .allocation_unit_size = 4096,
+    };
+    esp_err_t err = esp_vfs_fat_spiflash_mount_rw_wl("/flash", "storage", &config, &s_wl);
+    if (err != ESP_OK) {
+        s_wl = WL_INVALID_HANDLE;
+        ESP_LOGW(TAG, "flash mount: %s", esp_err_to_name(err));
+    }
     return err;
 }
 

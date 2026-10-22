@@ -16,7 +16,7 @@
     return field(48);
   }
   async function prepare(manifest, manifestURL, archiveFiles) {
-    if (!/^\d+\.\d+\.\d+(?:-rc\d+)?$/.test(manifest.version) ||
+    if (!/^\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?$/.test(manifest.version) ||
         manifest.new_install_prompt_erase !== true || manifest.builds?.length !== 1 ||
         manifest.builds[0].chipFamily !== "ESP32-S3" || manifest.builds[0].parts?.length !== 4)
       throw new Error("刷机清单无效，请刷新页面后重试。");

@@ -132,6 +132,13 @@ static EpdRect s_pressed;
 static bool s_press_pending;
 static EpdRect continue_card_rect(void) { return (EpdRect){36,184,612,378}; }
 static EpdRect continue_card_hit_rect(void) { return (EpdRect){24,172,636,402}; }
+// 顶栏 Anki 入口：位于「首页」标题（右缘约 x150）与阅读分钟（右对齐
+// x490）之间的空带，右边界 ≤400 避开分钟文本，y 与圆环/头像中线一致。
+// / Top-bar Anki entry: sits in the empty band between the "首页" title
+// (right edge ~x150) and the reading minutes (right-aligned at x490),
+// right edge ≤400 clears the minutes text, y matches the ring/avatar
+// midline.
+static EpdRect anki_pill_rect(void) { return (EpdRect){210,88,160,60}; }
 static bool continue_card_pressed(void) { return s_press_pending && s_pressed.height == 378; }
 static EpdRect control_feedback_area(EpdRect control) {
     return control.height == 378 ? (EpdRect){56,270,184,252} : control;
@@ -565,6 +572,14 @@ static void render_root(uint8_t *fb) {
 #define HOME_STAGE(name) do {} while(0)
 #endif
     ui_nav_status(fb);ui_text(fb,36,91,52,"首页",EPD_DRAW_ALIGN_LEFT,false);
+    // 顶栏 Anki 入口：圆角矩形 + 三像素边线沿用页面灰阶，按下时底色反转，
+    // 描边高亮由 render() 的 s_pressed 统一叠加。/ Top-bar Anki entry:
+    // rounded rect plus 3px rules in page grays; the fill inverts while
+    // pressed and the outline highlight is added by render() via s_pressed.
+    bool anki_pressed=s_press_pending&&s_pressed.x==210&&s_pressed.y==88;
+    ui_fill_round_rect(fb,anki_pill_rect(),28,anki_pressed?0xe0:0xf0);
+    home_frame(fb,anki_pill_rect(),28);
+    label(fb,290,118,26,"Anki 学习",EPD_DRAW_ALIGN_CENTER,anki_pressed?0x20:0x30);
     char value[80];unsigned seconds=today_seconds();
     snprintf(value,sizeof(value),"%u 分钟",seconds/60);fit(value,24,180);label(fb,490,118,24,value,EPD_DRAW_ALIGN_RIGHT,0x30);
     ring(fb,540,118,30,7,seconds,app_settings_home_goal_minutes()*60);
@@ -894,6 +909,7 @@ static bool hit(EpdRect r,int x,int y) {return x>=r.x&&x<r.x+r.width&&y>=r.y&&y<
 static EpdRect control(int x,int y) {
     if(s_view==HOME_ROOT) {
         if(featured()->path[0] && hit(continue_card_hit_rect(),x,y))return continue_card_rect();
+        if(hit(anki_pill_rect(),x,y))return anki_pill_rect();
         if(hit((EpdRect){510,88,60,60},x,y))return(EpdRect){510,88,60,60};
     }else if(hit((EpdRect){36,78,60,60},x,y))return(EpdRect){0}; // 共享圆圈反馈负责题头返回，避免再叠错位框。/ Shared circle feedback owns header backs; do not add a shifted frame.
     if(s_view==HOME_COMPONENT){
@@ -944,6 +960,14 @@ static app_redraw_t on_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev) {
         if(old!=s_goal_draft){s_area=(EpdRect){36,198,612,830};return APP_REDRAW_AREA;}
     }else {
         int tab=ui_nav_hit(x,y);if(tab>=0){ui_nav_request(ctx,tab);return APP_REDRAW_NONE;}
+        if(hit(anki_pill_rect(),x,y)) {
+            // 直接切到 Anki 页面；不带文件导入，故不调 app_anki_request_open。
+            // / Switch straight to the Anki page; no file import involved, so
+            // app_anki_request_open is intentionally not called.
+            extern const app_desc_t app_anki;
+            ctx->request_app=&app_anki;
+            return APP_REDRAW_NONE;
+        }
         if(hit((EpdRect){24,640,320,365},x,y)){
             if(app_settings_home_component()==APP_HOME_FOLDER){ui_nav_request(ctx,1);return APP_REDRAW_NONE;}
             s_time_trail.valid=false;s_view=HOME_TIME;s_time_pending=false;s_time_stamp=-1;refresh_days();return APP_REDRAW_PAGE;
