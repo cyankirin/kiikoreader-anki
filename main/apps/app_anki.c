@@ -22,7 +22,6 @@
 #include "app_content_open.h"
 #include "anki_render.h"
 #include "anki_store.h"
-#include "app_font_context.h"
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -40,7 +39,11 @@
 #define ROW_H 92
 #define LIST_MAX 96
 #define LINE_MAX 220
-#define LINE_BUF 256
+// 折行探测与绘制行缓冲的容量，即单行字节上限：任何长度的无空格串都会
+// 在宽度内被切短，测量值永不小于真实占用。/ Probe/line buffer capacity,
+// i.e. the byte cap per line: any no-space run is cut to fit the width and
+// measurement never undercounts the real span.
+#define LINE_BUF 512
 #define APKG_DIRS 2
 
 typedef enum {
@@ -95,22 +98,16 @@ static char s_message[96];
 // Session state (with two 16KB card buffers) stays in PSRAM, off internal RAM.
 static anki_session_t* s_session;
 
-// 学习卡片正文属于阅读内容：进学习视图切到阅读字体，离开学习视图的所有
-// 路径（结束/翻到小结/退出 app）恢复原上下文。s_font_saved_valid 表示
-// s_font_saved 持有未恢复的保存值。/ A card body is reading content: the
-// study view switches to the reading face, and every path leaving the study
-// view (session end, summary, app exit) restores the previous context.
-// s_font_saved_valid marks s_font_saved as holding an unrestored save.
-static app_lock_font_t s_font_saved;
-static bool s_font_saved_valid;
-
-/// 离开学习视图时恢复字体上下文（幂等）。/ Restore the font context when
-/// leaving the study view (idempotent).
-static void study_font_restore(void) {
-    if (!s_font_saved_valid) return;
-    app_font_end_lock(&s_font_saved);
-    s_font_saved_valid = false;
-}
+// Anki 是系统页：所有视图（卡组列表/文件/忙碌/学习/小结）统一走系统字体，
+// 跟随「设置」里指定的系统字体；主循环每次切页都会先
+// app_font_activate_system()（见 app_loop.c 的 switch_to），进入本页无需
+// 再显式切换。阅读字体只属于书页正文，与学习页无关。/ Anki is a system
+// page: every view (deck list, files, busy, study, summary) uses the system
+// face and follows the system font chosen in Settings; the main loop calls
+// app_font_activate_system() on every page switch (see switch_to in
+// app_loop.c), so entering this page needs no explicit switch. The reading
+// face belongs to book body text only and has nothing to do with the study
+// view.
 
 static anki_session_t* session_state(void) {
     if (!s_session) {
@@ -247,12 +244,28 @@ static void scan_apkg(void) {
 
 // ---------------------------------------------------------------- 会话
 
+// 正文排版与绘制同口径：ui_text() 内部会把每个字号过一次
+// ui_text_effective_px()（+2 且按系统字号百分比缩放），折行测量与行距
+// 必须复用该口径，否则量窄画宽、文本超屏。/ Body layout shares the draw
+// metric: ui_text() passes every size through ui_text_effective_px()
+// (+2 plus system-size scaling), so wrap measurement and line pitch must
+// reuse it, or lines measure narrow, draw wide and overflow the screen.
+static int body_px(void) {
+    return ui_text_effective_px(UI_PX_BODY);
+}
+
 static void wrap_card_text(void) {
     const char* text = SESS()->text ? SESS()->text : "";
     SESS()->line_count = 0;
     SESS()->line_page = 0;
-    int px = UI_PX_BODY;
-    int width = ui_content_width();
+    const int px = body_px();
+    const int width = ui_content_width();
+    // 探测缓冲一次分配复用；候选长度先钳到容量内，测量永远是完整候选的
+    // 宽度，超长无空格串也会在宽度内被切短。/ One reusable probe buffer;
+    // the candidate is clamped to its capacity first, so measurement always
+    // covers the full candidate and long no-space runs still cut to width.
+    static char probe[LINE_BUF];
+    const size_t max_take = sizeof(probe) - 1;
     size_t i = 0;
     size_t len = strlen(text);
     while (i < len && SESS()->line_count < LINE_MAX) {
@@ -262,23 +275,32 @@ static void wrap_card_text(void) {
         size_t seg_len = end - i;
         size_t start = i;
         while (seg_len > 0 && SESS()->line_count < LINE_MAX) {
-            // 贪心折行：能放就放，放不下从最后一个空格断。/ Greedy wrap: fit what
-            // fits, break at the last space when a word overflows.
-            size_t take = seg_len;
+            // 贪心折行：能放就放，放不下从最后一个空格断。/ Greedy wrap: fit
+            // what fits, break at the last space when a word overflows.
+            size_t take = seg_len < max_take ? seg_len : max_take;
             while (take > 1) {
-                char probe[LINE_BUF];
-                size_t n = take;
-                if (n >= sizeof(probe)) n = sizeof(probe) - 1;
-                memcpy(probe, text + start, n);
-                probe[n] = 0;
+                memcpy(probe, text + start, take);
+                probe[take] = 0;
                 if (ui_text_fixed_width_px(px, probe) <= width) break;
                 // 二进制+线性混合：先减半再逐字回退，避免超长行反复全量测量。
                 // Halve then step back by characters, so long lines do not
                 // remeasure the whole span each time.
                 take = take > 16 ? take - take / 4 : take - 1;
-                if (take < 1) take = 1;
             }
-            // 优先在空格处断。/ Prefer breaking at a space.
+            // 截断点对齐 UTF-8 字符边界：text[start+take] 是续行字节说明
+            // 切在了多字节字符中间，回退到字符起点；take 已缩到 1 且首字节
+            // 是引导字节时向前吃满整个字符，不留孤立引导字节。/ Align the
+            // cut to a UTF-8 boundary: a continuation byte at
+            // text[start+take] means the cut split a multi-byte character,
+            // so back off to its start; when take has shrunk to 1 on a lead
+            // byte, consume the whole character rather than leave a lone
+            // lead byte behind.
+            while (take > 1 && ((unsigned char)text[start + take] & 0xC0) == 0x80) --take;
+            if (take == 1 && ((unsigned char)text[start] & 0xC0) == 0xC0) {
+                while (start + take < end && ((unsigned char)text[start + take] & 0xC0) == 0x80) ++take;
+            }
+            // 优先在空格处断（空格是单字节，断后必为字符边界）。
+            // / Prefer breaking at a space (ASCII, so the cut is a boundary).
             size_t cut = take;
             for (size_t k = cut; k > 1; --k) {
                 if (text[start + k - 1] == ' ') {
@@ -301,7 +323,10 @@ static void wrap_card_text(void) {
 static int lines_per_page(void) {
     int top = UI_CONTENT_TOP + 8;
     int bottom = UI_CONTENT_BOTTOM - 8;
-    return (bottom - top) / (UI_PX_BODY + 10);
+    // 行距与绘制一致：正文按 body_px() 排版，渲染与翻页同步这一口径。
+    // / Pitch matches drawing: the body lays out at body_px() and render
+    // and paging step by the same metric.
+    return (bottom - top) / (body_px() + 10);
 }
 
 static void session_load_back(void);
@@ -367,20 +392,12 @@ static void session_start(int deck_index) {
         s_view = ANKI_VIEW_SUMMARY;
         return;
     }
-    // 卡面正文用阅读字体；必须在渲染第一张卡之前切换。/ Card bodies use
-    // the reading face; switch before rendering the first card.
-    app_font_begin_card(&s_font_saved);
-    s_font_saved_valid = true;
     session_load_front();
     session_open_card();
     s_view = ANKI_VIEW_STUDY;
 }
 
 static void session_end(void) {
-    // 学习页回到卡组列表（系统字体界面），先恢复字体上下文。
-    // / Back to the deck list (a system-face UI); restore the font context
-    // first.
-    study_font_restore();
     anki_store_unload(&SESS()->deck);
     SESS()->active = false;
     s_view = ANKI_VIEW_DECKS;
@@ -390,8 +407,6 @@ static void session_end(void) {
 static void session_next(void) {
     ++SESS()->session_pos;
     if (SESS()->session_pos >= SESS()->session_count) {
-        // 小结是系统字体界面。/ The summary is a system-face UI.
-        study_font_restore();
         s_view = ANKI_VIEW_SUMMARY;
         return;
     }
@@ -503,6 +518,9 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
             if (SESS()->line_page >= pages) SESS()->line_page = pages - 1;
             int first = SESS()->line_page * per;
             int y = UI_CONTENT_TOP + 8;
+            // 行距与 lines_per_page/wrap 同口径，页面计数与绘制不会错位。
+            // / Same pitch as lines_per_page/wrap so paging and drawing agree.
+            const int pitch = body_px() + 10;
             char line[LINE_BUF];
             for (int i = first; i < first + per && i < SESS()->line_count; ++i) {
                 size_t n = SESS()->line_len[i];
@@ -510,7 +528,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                 memcpy(line, SESS()->text + SESS()->line_off[i], n);
                 line[n] = 0;
                 ui_text(fb, UI_MARGIN, y, UI_PX_BODY, line, EPD_DRAW_ALIGN_LEFT, false);
-                y += UI_PX_BODY + 10;
+                y += pitch;
             }
             if (SESS()->line_count == 0) {
                 ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 8, UI_PX_BODY, "[空卡片]",
@@ -544,7 +562,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                     EPD_DRAW_ALIGN_LEFT, false);
             snprintf(line, sizeof(line), "记住 %d · 忘记 %d", SESS()->good_or_better,
                      SESS()->again);
-            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + UI_PX_BODY + 12, UI_PX_BODY, line,
+            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + body_px() + 12, UI_PX_BODY, line,
                     EPD_DRAW_ALIGN_LEFT, false);
             ui_draw_button(fb, bar_button_rect(), "返回卡组 Back", false);
             ui_draw_menu_handle(fb, false);
@@ -579,9 +597,8 @@ static void on_enter(app_ctx_t* ctx) {
     s_page = 0;
     message_set(NULL);
     if (SESS()->active) {
-        // 防御：带会话状态重进本页时一并恢复字体。/ Defensive: also
-        // restore the face when re-entering with live session state.
-        study_font_restore();
+        // 防御：带会话状态重进本页时先卸载旧会话。/ Defensive: drop a live
+        // session when re-entering the page.
         anki_store_unload(&SESS()->deck);
         SESS()->active = false;
     }
@@ -601,9 +618,6 @@ static void on_enter(app_ctx_t* ctx) {
    "conflicting types"（-Werror 下编不过）。此处统一加 anki_ 前缀。 */
 static void anki_on_exit(app_ctx_t* ctx) {
     (void)ctx;
-    // 学习页直接退出到别的 app 也要恢复字体。/ Leaving the app mid-study
-    // must restore the face too.
-    study_font_restore();
     if (SESS()->active) {
         anki_store_unload(&SESS()->deck);
         SESS()->active = false;

@@ -8,6 +8,14 @@ User-visible changes by release; see [README](../README.md) for usage.
 （暂无 / None yet）
 
 
+## 0.3.3-rc99.02 / 2026-10-22
+
+- Anki 学习页字体统一跟随「设置」指定的系统字体：学习视图不再切换到阅读字体（此前与设置不一致且缺字），所有视图与系统界面同字体；阅读字体仅用于书页正文。
+  The Anki study view now follows the system font chosen in Settings: the study view no longer switches to the reading face (previously mismatching Settings and dropping glyphs), all views share the system face; the reading face stays book-body only.
+- 卡片折行按绘制同口径测量并修两处溢出隐患：测量与行距改用 ui_text() 实际使用的有效字号，量窄画宽导致的超屏不再出现；截断点对齐 UTF-8 字符边界，不再切断多字节字符；超长无空格串也能在宽度内被切短。
+  Card wrapping now measures at the draw-time metric and fixes two overflow hazards: measurement and line pitch use the effective size ui_text() actually draws with, so lines no longer measure narrow and draw wide off-screen; cuts align to UTF-8 boundaries instead of splitting multi-byte characters; very long no-space runs also wrap within the width.
+
+
 ## 0.3.3-rc99.01 / 2026-10-22
 
 - 基于 rc99 移植完整 Anki 功能：新增 Anki 卡组学习页，导入 TF 卡上的 .apkg（或裸 collection.anki2/anki21），在设备上翻面学习并记录复习进度；解析、渲染与调度有宿主测试覆盖。导入与学习均为文本卡片，图片与音频显示占位。

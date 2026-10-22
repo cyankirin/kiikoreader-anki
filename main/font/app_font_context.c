@@ -101,20 +101,6 @@ void app_font_begin_lock(app_lock_font_t *saved) {
     app_font_activate_system();
 }
 
-// 学习卡片属于阅读内容：与 begin_lock 一样保存字面与阅读标志，但切入
-// 阅读字体（阅读字重/抗锯齿/阅读缩放）；恢复走 end_lock，按保存的
-// reading 标志还原笔画、抗锯齿与 ui_text 设置。/ Studying a card is
-// reading content: like begin_lock this saves the face and reading flag,
-// but switches to the reading face (reading weight/antialias/scale).
-// Restoration goes through end_lock, which restores stroke, antialias and
-// ui_text settings from the saved reading flag.
-void app_font_begin_card(app_lock_font_t *saved) {
-    if (!saved) return;
-    snprintf(saved->path, sizeof(saved->path), "%s", ttf_font_path());
-    saved->reading = s_reading;
-    app_font_activate_reading();
-}
-
 void app_font_end_lock(const app_lock_font_t *saved) {
     if (!saved) return;
     (void)activate(saved->path);

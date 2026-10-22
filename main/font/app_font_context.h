@@ -16,10 +16,6 @@ typedef struct {
 /// Temporarily use the system face for tickets and library collages; join page preparation first and restore the context after waking.
 void app_font_begin_lock(app_lock_font_t *saved);
 void app_font_end_lock(const app_lock_font_t *saved);
-/// 保存当前字体上下文并切到阅读字体（学习卡片正文用）。
-/// Save the current face and switch to the reading face for card bodies.
-/// 恢复复用 app_font_end_lock。/ Restore with app_font_end_lock.
-void app_font_begin_card(app_lock_font_t *saved);
 
 bool app_font_activate_system(void);
 bool app_font_activate_reading(void);
