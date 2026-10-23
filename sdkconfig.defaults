@@ -2,7 +2,12 @@ CONFIG_IDF_TARGET="esp32s3"
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
 CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="boards/pico/partitions.csv"
+# 分区表在仓库根目录。boards/pico/partitions.csv 是从上游继承的失效路径，
+# 干净构建（无 sdkconfig 时按 defaults 生成）会因找不到该文件直接失败。
+# The partition table lives at the repo root. boards/pico/partitions.csv is a
+# stale path inherited from upstream; a clean build (sdkconfig generated from
+# these defaults) fails outright because that file does not exist.
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 # 实验性组合：MSPI 的 flash 与 PSRAM 共用时钟域，CPU 240MHz 下 IDF 只标定了
@@ -30,6 +35,16 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 # 多层 EPUB/PNG 调用留安全余量；大型缓存不得放栈上。/ Reserve nested EPUB/PNG stack headroom; keep large caches off-stack.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=12288
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Anki 功能分区余量所迫：控制台日志仅保留 ERROR，WARN 及以下全部编出；需要
+# 警告日志调试时把这两项调回 WARN。/ App-partition headroom with the Anki
+# feature: keep ERROR-only console logs so WARN and below compile out; set
+# both back to WARN when warning logs are needed for debugging.
+CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
+CONFIG_LOG_MAXIMUM_LEVEL_ERROR=y
+# 同属分区余量裁剪：错误码名字符串查找表编出，esp_err_to_name 只返回占位串。
+# / Same headroom trim: the error-code string table compiles out and
+# esp_err_to_name only returns a placeholder string.
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # 1ms tick：EPD 上电流程里按毫秒轮询 PGOOD，100Hz 的 tick 会把每次等待放大到 10ms
