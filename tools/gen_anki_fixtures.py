@@ -448,12 +448,113 @@ def gen_modern_dual():
     pack_dual_apkg(os.path.join(OUT, "modern-dual.apkg"), real_db, stub_db)
 
 
+def gen_choice_v2():
+    """选择题卡组：复刻真实「业余无线电新版」schema（字段 I/W/J/P/Q/A/B/C/D/T/N，
+    正面模板带 <li id="a">{{A}}</li>，背面模板靠一段 JavaScript 高亮正确选项——
+    设备上不执行脚本，由渲染层按 T 值拼装背面并强调正确选项）。
+    / Choice deck replicating the real amateur-radio schema (fields
+    I/W/J/P/Q/A/B/C/D/T/N, the front template carries <li id="a">{{A}}</li> and
+    the back template highlights correct options with JavaScript — never
+    executed on device; the renderer assembles the back from T instead)."""
+    mid = 1700000000700
+    qfmt = (
+        "<small>{{I}} / {{J}} / {{P}}</small>\n"
+        '<p class="question"><span class="type">{{W}}</span>{{Q}}</p>\n'
+        '\n<ul id="options">\n'
+        '<li id="a">{{A}}</li>\n'
+        '<li id="b">{{B}}</li>\n'
+        '<li id="c">{{C}}</li>\n'
+        '<li id="d">{{D}}</li>\n'
+        '<li class="hidden">placeholder</li>\n'
+        "</ul>\n"
+    )
+    afmt = (
+        "{{FrontSide}}\n"
+        "\n<script>\n"
+        "(() => {\n"
+        '    const keyStr = "{{T}}".toLowerCase();\n'
+        '    const options = document.querySelectorAll("#options li:not(.hidden)");\n'
+        "\n"
+        "    options.forEach(item => {\n"
+        '        item.classList.add("dim");\n'
+        "        if (keyStr.includes(item.id)) {\n"
+        '            item.classList.remove("dim");\n'
+        "        }\n"
+        "    });\n"
+        "})();\n"
+        "</script>\n"
+    )
+    models = {
+        str(mid): {
+            "id": mid,
+            "name": "业余无线电新版",
+            "type": 0,
+            "flds": [
+                {"name": "I", "ord": 0, "font": "Arial", "size": 20},
+                {"name": "W", "ord": 1, "font": "Arial", "size": 20},
+                {"name": "J", "ord": 2, "font": "Arial", "size": 20},
+                {"name": "P", "ord": 3, "font": "Arial", "size": 20},
+                {"name": "Q", "ord": 4, "font": "Arial", "size": 20},
+                {"name": "A", "ord": 5, "font": "Arial", "size": 20},
+                {"name": "B", "ord": 6, "font": "Arial", "size": 20},
+                {"name": "C", "ord": 7, "font": "Arial", "size": 20},
+                {"name": "D", "ord": 8, "font": "Arial", "size": 20},
+                {"name": "T", "ord": 9, "font": "Arial", "size": 20},
+                {"name": "N", "ord": 10, "font": "Arial", "size": 20},
+            ],
+            "tmpls": [
+                {
+                    "name": "卡片 1",
+                    "ord": 0,
+                    "qfmt": qfmt,
+                    "afmt": afmt,
+                }
+            ],
+        }
+    }
+    decks = {"1700000000701": {"id": 1700000000701, "name": "无线电考试", "conf": 1}}
+    notes = [
+        # 单选：T="A"，注释为空。/ Single choice: T="A", empty note.
+        note(
+            1700000000701,
+            mid,
+            "MC1-0001\x1f单选\x1fLY0001\x1f1.1.1\x1f"
+            "我国依法负责对业余无线电台实施监督管理的机构是：\x1f"
+            "国家无线电管理机构和省、自治区、直辖市无线电管理机构\x1f"
+            "在国家或地方民政部门注册的业余无线电协会\x1f"
+            "国家体育管理机构和地方体育管理机构\x1f"
+            "国家和地方公安部门\x1f"
+            "A\x1f",
+        ),
+        # 多选：T="AC"，带注释。/ Multiple choice: T="AC", with a note.
+        note(
+            1700000000702,
+            mid,
+            "MC2-0002\x1f多选\x1fLY0002\x1f1.1.1\x1f"
+            "我国专门针对无线电管理的行政法规及其制定机构是：\x1f"
+            "《中华人民共和国无线电管理条例》\x1f"
+            "《中华人民共和国无线电管理办法》\x1f"
+            "国务院和中央军委\x1f"
+            "工业和信息化部\x1f"
+            "AC\x1f参见《条例》第一章",
+        ),
+    ]
+    cards = [
+        card(1700000000701, 1700000000701, 1700000000701),
+        card(1700000000702, 1700000000702, 1700000000701),
+    ]
+    db = os.path.join(OUT, "choice.anki2")
+    write_v2(db, models, decks, notes, cards)
+    pack_apkg(os.path.join(OUT, "choice-v2.apkg"), db)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     gen_basic_v2()
     gen_v1_scheduler()
     gen_conditional()
     gen_cloze()
+    gen_choice_v2()
     gen_v3()
     gen_big()
     gen_bare()

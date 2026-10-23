@@ -82,6 +82,10 @@ typedef struct {
     const char* text;      // 当前显示的文本 / text on screen
     size_t line_off[LINE_MAX];
     size_t line_len[LINE_MAX];
+    // 行首 \x01 强调标记（选择题背面正确选项/答案行）：该行反色绘制。
+    // Leading \x01 emphasis marker (choice-back correct options/answer line):
+    // that line is drawn inverted.
+    bool line_invert[LINE_MAX];
     int line_count;
     int line_page;
     int studied;
@@ -258,6 +262,10 @@ static void wrap_card_text(void) {
     const char* text = SESS()->text ? SESS()->text : "";
     SESS()->line_count = 0;
     SESS()->line_page = 0;
+    // 反色标记随折行全量赋值，这里再清零一遍，避免复用会话留下脏值。
+    // The invert flags are fully assigned during wrapping; zero them here
+    // too so a reused session never keeps stale values.
+    memset(SESS()->line_invert, 0, sizeof(SESS()->line_invert));
     const int px = body_px();
     const int width = ui_content_width();
     // 探测缓冲一次分配复用；候选长度先钳到容量内，测量永远是完整候选的
@@ -274,7 +282,23 @@ static void wrap_card_text(void) {
         while (end < len && text[end] != '\n') ++end;
         size_t seg_len = end - i;
         size_t start = i;
+        // \x01 只认段首（渲染层只在行首放它）；段内出现的按普通字符处理。
+        // \x01 counts only at a segment start (the renderer emits it at line
+        // heads only); one inside the text is an ordinary character.
+        bool seg_start = true;
         while (seg_len > 0 && SESS()->line_count < LINE_MAX) {
+            // 行首 \x01 为强调标记：该行反色绘制；跳过该字节再开始本行
+            // 内容，标记不占显示宽度。/ A leading \x01 is the emphasis
+            // marker: the line draws inverted; skip the byte before the line
+            // content starts, the marker takes no display width.
+            bool invert = false;
+            if (seg_start && text[start] == '\x01') {
+                invert = true;
+                ++start;
+                --seg_len;
+            }
+            seg_start = false;
+            if (seg_len == 0) break; // 段仅剩标记：无内容可显示 / marker-only segment
             // 贪心折行：能放就放，放不下从最后一个空格断。/ Greedy wrap: fit
             // what fits, break at the last space when a word overflows.
             size_t take = seg_len < max_take ? seg_len : max_take;
@@ -311,6 +335,7 @@ static void wrap_card_text(void) {
             }
             SESS()->line_off[SESS()->line_count] = start;
             SESS()->line_len[SESS()->line_count] = cut;
+            SESS()->line_invert[SESS()->line_count] = invert;
             ++SESS()->line_count;
             start += cut;
             while (start < end && text[start] == ' ') ++start; // 吞掉断行空格 / drop the break space
@@ -527,7 +552,12 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                 if (n >= sizeof(line)) n = sizeof(line) - 1;
                 memcpy(line, SESS()->text + SESS()->line_off[i], n);
                 line[n] = 0;
-                ui_text(fb, UI_MARGIN, y, UI_PX_BODY, line, EPD_DRAW_ALIGN_LEFT, false);
+                // 行首带 \x01 强调标记的行反色绘制（黑底白字），墨水屏上
+                // 清晰醒目；其余行常规黑字。/ Lines carrying the leading \x01
+                // emphasis marker draw inverted (white on black) for clarity
+                // on e-paper; every other line draws ordinary black.
+                ui_text(fb, UI_MARGIN, y, UI_PX_BODY, line, EPD_DRAW_ALIGN_LEFT,
+                        SESS()->line_invert[i]);
                 y += pitch;
             }
             if (SESS()->line_count == 0) {

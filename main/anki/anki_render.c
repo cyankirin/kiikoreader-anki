@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：模板渲染实现。有界输出构建器 + 字段查找 + 条件段 + cloze 处理，
- *       最后复用 html_to_blocks 得到块文本。
+ *       最后复用 html_to_blocks 得到块文本；选择题模型另走专用背面版面
+ *       （按字段拼装，正确选项与答案行加 \x01 强调标记）。
  * English: Template rendering. Bounded output builder, field lookup,
  *          conditional sections and cloze handling, then html_to_blocks for
- *          block text.
+ *          block text; choice models take a dedicated back layout (assembled
+ *          from fields, correct options and the answer line marked with \x01).
  */
 #include "anki_render.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -37,6 +40,17 @@ static void put(builder_t* b, const char* text, size_t len) {
 }
 
 static void puts_c(builder_t* b, const char* text) { put(b, text, strlen(text)); }
+
+/// 有界追加：超长按现有策略截断——保留已写内容，始终给结尾 NUL 留位。
+/// Bounded append: overflow truncates like the existing strategy, keeping
+/// what fit and always leaving room for the terminating NUL.
+static void put_trunc(builder_t* b, const char* text, size_t len) {
+    if (!b || !text || !len || b->len + 1 >= b->cap) return;
+    size_t room = b->cap - b->len - 1;
+    size_t n = len < room ? len : room;
+    memcpy(b->out + b->len, text, n);
+    b->len += n;
+}
 
 typedef struct {
     const anki_notetype_t* nt;
@@ -69,6 +83,18 @@ static const char* field_value(const render_ctx_t* rc, const char* name, size_t 
     }
     *value_len = 0;
     return NULL;
+}
+
+/// 按索引取上下文字段；越界（flds 段数少于模型字段数）返回 NULL。
+/// Fetch a context field by index; NULL when out of range (fewer flds parts
+/// than the model declares).
+static const char* ctx_field(const render_ctx_t* rc, int index, size_t* value_len) {
+    if (index < 0 || index >= rc->field_count) {
+        *value_len = 0;
+        return NULL;
+    }
+    *value_len = rc->field_lens[index];
+    return rc->fields[index];
 }
 
 /// 处理字段文本里的 cloze 标记；active 为激活序号（0 = 全未激活）。
@@ -296,6 +322,245 @@ static const anki_notetype_t* view_notetype(const anki_collection_t* col, int64_
     return NULL;
 }
 
+/// 选择题版面：选项字段（单字母字段名）与答案字段的位置。
+/// Choice layout: where the option fields (single-letter names) and the
+/// answer field live.
+typedef struct {
+    int option_field[ANKI_MAX_FIELDS];   ///< 选项字段索引 / option field indices
+    char option_letter[ANKI_MAX_FIELDS]; ///< 选项字母（大写）/ option letters, uppercased
+    int option_count;                    ///< 选项数量 / option count
+    int answer_field;                    ///< 答案字段索引 / answer field index
+    int question_field;                  ///< 题干字段索引 / question field index
+    int note_field;                      ///< 注释字段索引，-1 表示无 / note field index, -1 when absent
+} choice_layout_t;
+
+/// 单字母字段名（大小写不敏感）的大写形式；非单 ASCII 字母返回 0。
+/// Uppercase form of a single-letter field name (case-insensitive); 0 when
+/// the name is not a single ASCII letter.
+static char single_letter_field(const char* name) {
+    if (!name || name[0] == 0 || name[1] != 0) return 0;
+    char c = name[0];
+    if (c >= 'a' && c <= 'z') return (char)(c - 'a' + 'A');
+    if (c >= 'A' && c <= 'Z') return c;
+    return 0;
+}
+
+/// 该字段索引是否已是选项字段。/ Whether the index is already an option field.
+static bool choice_is_option(const choice_layout_t* layout, int index) {
+    for (int i = 0; i < layout->option_count; ++i) {
+        if (layout->option_field[i] == index) return true;
+    }
+    return false;
+}
+
+/// 识别选择题模型：选项字段名是单个 ASCII 字母，且字母构成从 'A' 起的连续段
+/// （A、B、C、D…，数量 ≥2）；另有非选项字段，其值 trim+大写后非空且每个
+/// 字符都是选项字母（如 "AC"）→ 答案字段。题干取名为 "Q" 的字段（找不到则
+/// 退化为第一个非选项非答案字段），注释取名为 "N" 的字段（没有则 -1）。
+/// 任一条件不满足 → 非选择题，返回 false（现有行为不变）。
+/// Detect a choice model: option field names are single ASCII letters forming
+/// a consecutive run from 'A' (A, B, C, D, …, at least two); a non-option
+/// field whose trimmed, uppercased value is non-empty and made only of option
+/// letters (e.g. "AC") is the answer field. The question is the field named
+/// "Q" (falling back to the first non-option, non-answer field) and the note
+/// the field named "N" (-1 when absent). Any miss means not a choice card
+/// and returns false (existing behaviour unchanged).
+static bool choice_layout(const anki_collection_t* col, const anki_card_t* card,
+                          choice_layout_t* out) {
+    if (!col || !card || !out) return false;
+    const anki_note_t* note = view_note(col, card->nid);
+    if (!note) return false;
+    const anki_notetype_t* nt = view_notetype(col, note->mid);
+    if (!nt || nt->field_count <= 0) return false;
+
+    out->option_count = 0;
+    out->answer_field = -1;
+    out->question_field = -1;
+    out->note_field = -1;
+
+    // 真实选择题模型（如「业余无线电新版」：I/W/J/P/Q/A/B/C/D/T/X/Y/Z/F/N）
+    // 里绝大多数字段名同样是单字母，若把全部单字母字段都当选项，则整表皆
+    // 选项、反而找不到「另一字段」充当答案。选项字母因此取从 'A' 起的连续
+    // 段：A、B、C、D 在而 E 不在时，选项恰为 A–D，与设计示例 "A".."D" 一致。
+    // In real choice models (e.g. the amateur-radio notetype with fields
+    // I/W/J/P/Q/A/B/C/D/T/X/Y/Z/F/N) most names are single letters too;
+    // treating every single-letter field as an option would make the whole
+    // table options and leave no "other" field for the answer. Option
+    // letters therefore take the consecutive run from 'A': with A, B, C, D
+    // present and E absent the options are exactly A–D, matching the
+    // design's "A".."D" example.
+    bool present[26] = {false};
+    for (int i = 0; i < nt->field_count; ++i) {
+        char c = single_letter_field(nt->fields[i]);
+        if (c) present[c - 'A'] = true;
+    }
+    int run = 0;
+    while (run < 26 && present[run]) ++run;
+    if (run < 2) return false; // 选项不足两个 / fewer than two options
+
+    // 按字段顺序记录选项字段与字母。/ Record option fields and letters in field order.
+    for (int i = 0; i < nt->field_count && out->option_count < ANKI_MAX_FIELDS; ++i) {
+        char c = single_letter_field(nt->fields[i]);
+        if (!c || c - 'A' >= run) continue;
+        out->option_field[out->option_count] = i;
+        out->option_letter[out->option_count] = c;
+        ++out->option_count;
+    }
+
+    // 答案字段：非选项字段中，值 trim+大写后非空且全部字符都是选项字母。
+    // Answer field: among non-option fields, the first whose trimmed,
+    // uppercased value is non-empty and consists only of option letters.
+    render_ctx_t rc = {0};
+    rc.nt = nt;
+    split_fields(&rc, note->flds, strlen(note->flds), NULL, nt->field_count);
+    for (int i = 0; i < rc.field_count; ++i) {
+        if (choice_is_option(out, i)) continue;
+        const char* v = rc.fields[i];
+        size_t len = rc.field_lens[i];
+        size_t s = 0;
+        while (s < len && isspace((unsigned char)v[s])) ++s;
+        size_t e = len;
+        while (e > s && isspace((unsigned char)v[e - 1])) --e;
+        if (s == e) continue; // 空值不计 / an empty value does not count
+        bool subset = true;
+        for (size_t k = s; k < e; ++k) {
+            char c = (char)toupper((unsigned char)v[k]);
+            bool is_option_letter = false;
+            for (int o = 0; o < out->option_count; ++o) {
+                if (out->option_letter[o] == c) {
+                    is_option_letter = true;
+                    break;
+                }
+            }
+            if (!is_option_letter) {
+                subset = false;
+                break;
+            }
+        }
+        if (subset) {
+            out->answer_field = i;
+            break;
+        }
+    }
+    if (out->answer_field < 0) return false;
+
+    // 题干：名为 "Q" 的字段，找不到则退化为第一个非选项非答案字段。
+    // Question: the field named "Q", else the first non-option, non-answer field.
+    for (int i = 0; i < nt->field_count; ++i) {
+        if (choice_is_option(out, i) || i == out->answer_field) continue;
+        if (strcasecmp(nt->fields[i], "Q") == 0) {
+            out->question_field = i;
+            break;
+        }
+    }
+    if (out->question_field < 0) {
+        for (int i = 0; i < nt->field_count; ++i) {
+            if (choice_is_option(out, i) || i == out->answer_field) continue;
+            out->question_field = i;
+            break;
+        }
+    }
+    // 注释：名为 "N" 的字段，没有则保持 -1。/ Note: the field named "N", else -1.
+    for (int i = 0; i < nt->field_count; ++i) {
+        if (choice_is_option(out, i) || i == out->answer_field) continue;
+        if (strcasecmp(nt->fields[i], "N") == 0) {
+            out->note_field = i;
+            break;
+        }
+    }
+    return true;
+}
+
+/// 把一个字段的 HTML 洗成纯文本追加进去；空字段或清洗失败时跳过。
+/// Clean one field's HTML to plain text and append it; empty fields and
+/// cleaning failures are skipped.
+static void put_field_text(builder_t* b, char* buf, const char* value, size_t len) {
+    if (!value || len == 0) return;
+    if (html_to_text(value, len, buf, FIELD_VALUE_MAX) != ESP_OK) return;
+    put_trunc(b, buf, strlen(buf));
+}
+
+/// 选择题背面：不走通用 HTML 模板路径，直接按字段拼装纯文本（行 = '\n'
+/// 分隔）：第 1 行题干；每个选项一行 `<字母>. <选项纯文本>`，正确选项行首加
+/// 强调标记 \x01；一行 `答案：<T 的原值>`（同样加 \x01）；注释字段非空时
+/// 追加 `备注：<N>`。输出受出参容量约束，超长截断并保证 NUL 结尾。
+/// Choice back: bypass the generic HTML template path and assemble plain
+/// text from fields (lines separated by '\n'): the question first; one line
+/// per option as `<letter>. <option text>`, correct options prefixed with
+/// the \x01 emphasis marker; one line `答案：<raw T>` (also \x01); and
+/// `备注：<N>` when the note field is non-empty. Output respects the
+/// caller's cap: overflow truncates and the result stays NUL-terminated.
+static esp_err_t render_choice_back(const anki_collection_t* col, const anki_card_t* card,
+                                    const choice_layout_t* layout, char* out, size_t cap) {
+    const anki_note_t* note = view_note(col, card->nid);
+    if (!note) return ESP_ERR_NOT_FOUND;
+    const anki_notetype_t* nt = view_notetype(col, note->mid);
+    if (!nt) return ESP_ERR_NOT_FOUND;
+
+    render_ctx_t rc = {0};
+    rc.nt = nt;
+    split_fields(&rc, note->flds, strlen(note->flds), NULL, nt->field_count);
+
+    // 字段 HTML→文本的临时缓冲走堆：内部 RAM 静态区已近满，不给 BSS 添 16KB。
+    // The field HTML-to-text scratch buffer is heap-allocated: internal RAM
+    // is nearly full of statics, so BSS must not grow by 16KB.
+    char* buf = malloc(FIELD_VALUE_MAX);
+    if (!buf) return ESP_ERR_NO_MEM;
+
+    builder_t b = {.out = out, .len = 0, .cap = cap, .overflow = false};
+
+    // 答案原文：判定正确选项按 trim+大写逐个字母比对，答案行显示原值。
+    // The raw answer: the correct-option test compares letters trimmed and
+    // uppercased, while the answer line shows the original value.
+    size_t answer_len = 0;
+    const char* answer = ctx_field(&rc, layout->answer_field, &answer_len);
+
+    // 第 1 行：题干（复用现有 HTML→文本清洗）。/ First line: the question,
+    // reusing the existing HTML-to-text cleaning.
+    size_t q_len = 0;
+    const char* question = ctx_field(&rc, layout->question_field, &q_len);
+    put_field_text(&b, buf, question, q_len);
+    put_trunc(&b, "\n", 1);
+
+    // 选项行：`<字母>. <选项纯文本>`，正确选项行首加 \x01。
+    // Option lines: `<letter>. <option text>`, correct ones prefixed with \x01.
+    for (int i = 0; i < layout->option_count; ++i) {
+        size_t opt_len = 0;
+        const char* opt = ctx_field(&rc, layout->option_field[i], &opt_len);
+        if (!opt) continue;
+        bool correct = false;
+        for (size_t k = 0; k < answer_len && !correct; ++k) {
+            if ((char)toupper((unsigned char)answer[k]) == layout->option_letter[i]) {
+                correct = true;
+            }
+        }
+        if (correct) put_trunc(&b, "\x01", 1);
+        char head[3] = {layout->option_letter[i], '.', ' '};
+        put_trunc(&b, head, sizeof(head));
+        put_field_text(&b, buf, opt, opt_len);
+        put_trunc(&b, "\n", 1);
+    }
+
+    // 答案行。/ Answer line.
+    put_trunc(&b, "\x01", 1);
+    put_trunc(&b, "答案：", strlen("答案："));
+    put_field_text(&b, buf, answer, answer_len);
+    put_trunc(&b, "\n", 1);
+
+    // 备注行：注释字段非空时才追加。/ Note line: only when the note field is non-empty.
+    size_t note_len = 0;
+    const char* note_text = ctx_field(&rc, layout->note_field, &note_len);
+    if (note_text && note_len > 0) {
+        put_trunc(&b, "备注：", strlen("备注："));
+        put_field_text(&b, buf, note_text, note_len);
+        put_trunc(&b, "\n", 1);
+    }
+
+    out[b.len] = 0;
+    free(buf);
+    return ESP_OK;
+}
+
 static esp_err_t render_card(const anki_collection_t* col, const anki_card_t* card, bool back,
                              const char* front_text, char* out, size_t cap) {
     const anki_note_t* note = view_note(col, card->nid);
@@ -351,5 +616,13 @@ esp_err_t anki_render_front(const anki_collection_t* col, const anki_card_t* car
 esp_err_t anki_render_back(const anki_collection_t* col, const anki_card_t* card,
                            const char* front_text, char* out, size_t cap) {
     if (!col || !card || !out || cap == 0) return ESP_ERR_INVALID_ARG;
+    // 选择题模型走专用版面：正确选项与答案行加 \x01 强调标记（正面与此
+    // 无关，anki_render_front 不产生任何 \x01）。/ Choice models take the
+    // dedicated layout: correct options and the answer line carry the \x01
+    // emphasis marker (the front is untouched and never emits \x01).
+    choice_layout_t layout;
+    if (choice_layout(col, card, &layout)) {
+        return render_choice_back(col, card, &layout, out, cap);
+    }
     return render_card(col, card, true, front_text, out, cap);
 }

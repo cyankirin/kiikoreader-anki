@@ -437,6 +437,71 @@ static void test_render(void) {
     anki_apkg_free(&imp);
 }
 
+// 选择题背面强调：正确选项行与答案行带 \x01（反色绘制）标记；正面与普通
+// （非选择题）卡片一律不带。/ Choice-back emphasis: correct option lines and
+// the answer line carry the \x01 (inverted draw) marker; the front and
+// ordinary (non-choice) cards never carry it.
+static void test_choice_render(void) {
+    printf("== choice render ==\n");
+    anki_import_t imp = {0};
+    CHECK(anki_apkg_import(FIX "/choice-v2.apkg", &imp) == ESP_OK);
+    anki_collection_t col;
+    anki_collection_from_import(&imp, &col);
+    static char front[ANKI_CARD_TEXT_MAX], back[ANKI_CARD_TEXT_MAX];
+    if (imp.card_count == 2) {
+        // 单选卡：T="A"，只有 A 行强调。/ Single-choice card: T="A", only A is emphasised.
+        CHECK(anki_render_front(&col, &imp.cards[0], front, sizeof(front)) == ESP_OK);
+        CHECK(strstr(front, "\x01") == NULL); // 正面无强调标记 / no marker on the front
+        CHECK(anki_render_back(&col, &imp.cards[0], front, back, sizeof(back)) == ESP_OK);
+        // 整篇背面逐行钉死：题干、选项（A 行首带 \x01）、答案行（带 \x01），
+        // 注释为空故无备注行。/ The whole back is pinned line by line:
+        // question, options (the A line leads with \x01) and the answer line
+        // (also \x01); the empty note means no note line.
+        CHECK(strcmp(back,
+                     "我国依法负责对业余无线电台实施监督管理的机构是：\n"
+                     "\x01"
+                     "A. 国家无线电管理机构和省、自治区、直辖市无线电管理机构\n"
+                     "B. 在国家或地方民政部门注册的业余无线电协会\n"
+                     "C. 国家体育管理机构和地方体育管理机构\n"
+                     "D. 国家和地方公安部门\n"
+                     "\x01"
+                     "答案：A\n") == 0);
+        CHECK(strstr(back, "\n\x01" "A. ") != NULL);     // 正确选项反色 / correct option inverted
+        CHECK(strstr(back, "\n\x01" "答案：A") != NULL);  // 答案行反色 / answer line inverted
+        CHECK(strstr(back, "\nB. ") != NULL);             // 错误选项常规 / wrong options stay plain
+        CHECK(strstr(back, "\n\x01" "B.") == NULL);
+        CHECK(strstr(back, "\n\x01" "C.") == NULL);
+        CHECK(strstr(back, "\n\x01" "D.") == NULL);
+        CHECK(strstr(back, "备注：") == NULL); // 注释为空无备注行 / no note line when N is empty
+
+        // 多选卡：T="AC"，A、C 两行强调。/ Multiple-choice card: T="AC", A and C are emphasised.
+        CHECK(anki_render_front(&col, &imp.cards[1], front, sizeof(front)) == ESP_OK);
+        CHECK(strstr(front, "\x01") == NULL);
+        CHECK(anki_render_back(&col, &imp.cards[1], front, back, sizeof(back)) == ESP_OK);
+        CHECK(strstr(back, "\n\x01" "A. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "C. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "答案：AC") != NULL);
+        CHECK(strstr(back, "\nB. ") != NULL);
+        CHECK(strstr(back, "\nD. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "B.") == NULL);
+        CHECK(strstr(back, "\n\x01" "D.") == NULL);
+        CHECK(strstr(back, "\n备注：参见《条例》第一章") != NULL); // 注释非空出备注行 / note line when N is set
+    }
+    anki_apkg_free(&imp);
+
+    // 回归保护：普通（非选择题）夹具背面不含强调标记。/ Regression guard:
+    // an ordinary (non-choice) fixture's back carries no emphasis marker.
+    imp = (anki_import_t){0};
+    CHECK(anki_apkg_import(FIX "/basic-v2.apkg", &imp) == ESP_OK);
+    anki_collection_from_import(&imp, &col);
+    if (imp.card_count == 3) {
+        CHECK(anki_render_front(&col, &imp.cards[0], front, sizeof(front)) == ESP_OK);
+        CHECK(anki_render_back(&col, &imp.cards[0], front, back, sizeof(back)) == ESP_OK);
+        CHECK(strstr(back, "\x01") == NULL);
+    }
+    anki_apkg_free(&imp);
+}
+
 // ---------------------------------------------------------------- 存储
 
 static int list_seen;
@@ -610,6 +675,7 @@ int main(void) {
     test_modern_export();
     test_rejects();
     test_render();
+    test_choice_render();
     test_store();
     if (failures) {
         printf("anki_host_test: FAIL (%d of %d checks)\n", failures, checks);

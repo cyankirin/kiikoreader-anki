@@ -8,6 +8,12 @@ User-visible changes by release; see [README](../README.md) for usage.
 （暂无 / None yet）
 
 
+## 0.3.3-rc99.03 / 2026-10-23
+
+- Anki 单选/多选卡片背面自动强调正确答案：自动识别「选项字段为连续单字母（A、B、C、D…，至少两个）且另有字段的值是这些选项字母的子集（如 "AC"）」的选择题模型，背面按题干、选项、答案、备注逐行纯文本排版，正确选项与答案行以反色（黑底白字）绘制，墨水屏上清晰醒目；正面渲染与普通卡片行为不变，背面模板里那段只在高亮正确选项的 JavaScript 不再依赖设备执行。
+  The Anki back side now emphasises correct answers on single/multiple-choice cards: choice models are detected automatically when option fields are consecutive single letters (A, B, C, D, …, at least two) and another field's value is a subset of those option letters (e.g. "AC"); the back lays out question, options, answer and note as plain-text lines, drawing correct options and the answer line inverted (white on black) for clarity on e-paper. Front rendering and ordinary cards behave as before, and the back template's answer-highlighting JavaScript no longer needs to run on device.
+
+
 ## 0.3.3-rc99.02 / 2026-10-22
 
 - Anki 学习页字体统一跟随「设置」指定的系统字体：学习视图不再切换到阅读字体（此前与设置不一致且缺字），所有视图与系统界面同字体；阅读字体仅用于书页正文。
