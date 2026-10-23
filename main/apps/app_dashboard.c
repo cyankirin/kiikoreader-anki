@@ -162,6 +162,27 @@ static void clock_base_prepare(void){
     ui_home_clock_bind_base_cache(s_clock_base_cache,s_clock_base_cache?UI_HOME_CLOCK_BASE_CACHE_BYTES:0);
 }
 
+// PSRAM 余量低于该值时暂停首页时钟/日历组件，先把内存还给阅读解析；余量恢复
+// 后下一帧自然恢复。/ Below this much free PSRAM the home clock/calendar
+// widgets pause so parsing gets the memory back; they return on their own
+// once the margin recovers. 512KB：一组组件加表盘底图约两百多 KB，留一倍
+// 余量给解析器的临时分配。/ 512KB: a widget set plus clock base runs a little
+// over 200KB, leaving a 2x margin for parser scratch allocations.
+#define HOME_WIDGET_PSRAM_MIN (512u * 1024u)
+// 组件暂停态；翻转时整页重画，避免表盘残影盖在提示文字上。/ The widget pause
+// state; a flip repaints the page so clock remnants never linger over the
+// notice text.
+static bool s_widgets_paused;
+// 入口查一次，不在各绘制函数里反复 sys 调用。/ Checked once per entry, never
+// per draw call.
+static bool home_widgets_paused(void) {
+#ifdef ESP_PLATFORM
+    return heap_caps_get_free_size(MALLOC_CAP_SPIRAM)<HOME_WIDGET_PSRAM_MIN;
+#else
+    return false; // 宿主没有 PSRAM 余量概念 / the host has no PSRAM margin
+#endif
+}
+
 static home_book_t *book_at(int index);
 
 static bool is_book(const char *name) {
@@ -571,6 +592,12 @@ static void render_root(uint8_t *fb) {
 #else
 #define HOME_STAGE(name) do {} while(0)
 #endif
+    // PSRAM 紧张时首页组件整体暂停：入口查一次余量，低于阈值即跳过组件绘制
+    // 并释放表盘底图，余量恢复后下一帧自然恢复。/ Tight PSRAM pauses the
+    // home widgets: the margin is checked once here, and below the threshold
+    // widget drawing is skipped and the clock base released; they return on
+    // their own once the margin recovers.
+    bool widgets_paused=home_widgets_paused();
     ui_nav_status(fb);ui_text(fb,36,91,52,"首页",EPD_DRAW_ALIGN_LEFT,false);
     // 顶栏 Anki 入口：圆角矩形 + 三像素边线沿用页面灰阶，按下时底色反转，
     // 描边高亮由 render() 的 s_pressed 统一叠加。/ Top-bar Anki entry:
@@ -616,7 +643,16 @@ static void render_root(uint8_t *fb) {
     } else label_on(fb,342,410,23,"打开一本书后，会在这里继续阅读",EPD_DRAW_ALIGN_CENTER,0x60,card_gray);
     HOME_STAGE("card_body");
     ui_draw_separator(fb,606,36,612,0x50);
-    if(app_settings_home_component()==APP_HOME_FOLDER) {
+    // 只门控时钟/日历组件区：「继续阅读」卡、题头（含今日闭环圆环）与闭环
+    // 说明不受影响。/ Only the clock/calendar widget area is gated: the
+    // resume card, the header (today's closed-loop ring included) and the
+    // closed-loop caption are untouched.
+    if(widgets_paused) {
+        // 释放可重建的表盘底图，把 PSRAM 还给阅读解析。/ Release the
+        // rebuildable clock base so parsing gets that PSRAM back.
+        app_home_release_clock_cache();
+        label(fb,184,800,22,"内存紧张，首页组件已暂停",EPD_DRAW_ALIGN_CENTER,0x60);
+    } else if(app_settings_home_component()==APP_HOME_FOLDER) {
         ui_home_folder_draw(fb,s_folder,s_folder_fast,(EpdRect){24,604,320,350});
         label(fb,184,985,22,"最近阅读",EPD_DRAW_ALIGN_CENTER,0x50);
     } else {
@@ -624,15 +660,19 @@ static void render_root(uint8_t *fb) {
         label(fb,184,985,22,component_name(app_settings_home_component()),EPD_DRAW_ALIGN_CENTER,0x50);
     }
     HOME_STAGE("component");
-    if(s_reading_days_valid) {
-        static const char *const wd[]={"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
-        snprintf(value,sizeof(value),"%d月%d日",s_date.tm_mon+1,s_date.tm_mday);
-        label(fb,354,665,30,value,EPD_DRAW_ALIGN_LEFT,0);
-        label(fb,642,665,24,wd[s_date.tm_wday],EPD_DRAW_ALIGN_RIGHT,0x50);
-        int start=(s_date.tm_wday+7-(s_date.tm_mday-1)%7)%7;
-        int rows=(start+month_length(&s_date)+6)/7;
-        calendar(fb,375,754,42,rows==6?38:48,26,app_settings_home_goal_minutes()*60);
-    } else label(fb,496,754,22,"请先设置日期与时间",EPD_DRAW_ALIGN_CENTER,0x60);
+    if(!widgets_paused) {
+        // 日历随组件一起暂停，右侧留白。/ The calendar pauses with the widget,
+        // leaving the right side blank.
+        if(s_reading_days_valid) {
+            static const char *const wd[]={"星期日","星期一","星期二","星期三","星期四","星期五","星期六"};
+            snprintf(value,sizeof(value),"%d月%d日",s_date.tm_mon+1,s_date.tm_mday);
+            label(fb,354,665,30,value,EPD_DRAW_ALIGN_LEFT,0);
+            label(fb,642,665,24,wd[s_date.tm_wday],EPD_DRAW_ALIGN_RIGHT,0x50);
+            int start=(s_date.tm_wday+7-(s_date.tm_mday-1)%7)%7;
+            int rows=(start+month_length(&s_date)+6)/7;
+            calendar(fb,375,754,42,rows==6?38:48,26,app_settings_home_goal_minutes()*60);
+        } else label(fb,496,754,22,"请先设置日期与时间",EPD_DRAW_ALIGN_CENTER,0x60);
+    }
     label(fb,642,985,22,"· 已闭环",EPD_DRAW_ALIGN_RIGHT,0x50);
     HOME_STAGE("calendar");
     ui_nav_draw(fb,0);
@@ -774,7 +814,10 @@ static bool present(app_ctx_t *ctx,app_redraw_t redraw) {
         s_clock_pending=false;
         ui_fill_rect_fast((EpdRect){24,18,156,44},0xff,ctx->fb);ui_nav_clock_draw(ctx->fb);
         enum EpdDrawError result=update_display_area_diff_with(ctx->hl,&E0470_WAVEFORM,MODE_GL16,(EpdRect){24,18,156,44});
-        if(result==EPD_DRAW_SUCCESS&&s_view==HOME_ROOT&&app_settings_home_component()!=APP_HOME_FOLDER) {
+        if(result==EPD_DRAW_SUCCESS&&s_view==HOME_ROOT&&app_settings_home_component()!=APP_HOME_FOLDER&&!home_widgets_paused()) {
+            // 组件暂停时不重绘表盘：分钟局刷只更新状态栏时钟，提示文字不被盖掉。
+            // / With the widgets paused the clock is not redrawn: the minute
+            // partial updates the status-bar clock only, leaving the notice intact.
             date_now(&s_date);ui_home_clock_style_t style=clock_style(app_settings_home_component());
             clock_draw_region(ctx->fb,(EpdRect){24,640,320,350},&s_date,app_settings_main_fast_refresh(),style,(EpdRect){24,640,320,326},s_widget_phase);
             result=present_clock_area(ctx,style==UI_HOME_CLOCK_PS1995?(EpdRect){78,684,198,198}:component_clock_graphics());
@@ -803,6 +846,9 @@ static void on_enter(app_ctx_t *ctx) {
     s_cover_generation=book_cover_jobs_begin();
     const uint32_t progress_revision=book_progress_revision();
     s_clock_base_attempted=false;clock_base_prepare();
+    // 以当前余量初始化暂停态，避免进页首帧多一次整页重画。/ Seed the pause
+    // state from the current margin so the first tick needs no extra repaint.
+    s_widgets_paused=home_widgets_paused();
     s_widget_trail.valid=s_time_trail.valid=false;
     (void)ctx;s_view=HOME_ROOT;s_clock_pending=s_time_pending=s_widget_pending=s_component_pending=false;s_press_pending=false;s_save_error=false;s_time_stamp=s_widget_stamp=-1;s_motion_ms=-100;
     s_home_force_full_once=app_settings_home_full_refresh();refresh_days();avatar_prepare_state();
@@ -836,6 +882,12 @@ static void on_media_ready(app_ctx_t *ctx) {(void)ctx;s_books_cache_valid=false;
 static app_redraw_t on_tick(app_ctx_t *ctx) {
     clock_base_prepare();
     if(ctx->consumed||(ctx->touch&&ctx->touch->touched))return APP_REDRAW_NONE;
+    // 组件暂停态翻转时整页重画：暂停即画提示并释放表盘底图，恢复即重绘组件，
+    // 都不会在组件区留下残影。/ A pause-state flip repaints the page: pausing
+    // paints the notice and releases the clock base, resuming redraws the
+    // widgets; neither leaves remnants in the widget area.
+    bool widgets_paused=home_widgets_paused();
+    if(widgets_paused!=s_widgets_paused){s_widgets_paused=widgets_paused;return APP_REDRAW_PAGE;}
     if(s_view==HOME_COMPONENT&&s_component_pending)return APP_REDRAW_AREA;
     bool folder_preview=s_view==HOME_COMPONENT&&s_component_browse==APP_HOME_FOLDER;
     if(s_view==HOME_ROOT||folder_preview){
@@ -867,7 +919,7 @@ static app_redraw_t on_tick(app_ctx_t *ctx) {
         if(date.tm_yday!=s_date.tm_yday||date.tm_year!=s_date.tm_year){refresh_days();return APP_REDRAW_PAGE;}
         if(date_stamp(&date)!=s_time_stamp||(ui_home_clock_has_motion(clock_style(app_settings_home_component()))&&phase!=s_time_phase_shown&&clock_motion_due(ctx))){s_time_date=date;s_time_phase=phase;s_time_pending=true;return APP_REDRAW_AREA;}return APP_REDRAW_NONE;
     }
-    if(visible_motion_clock()){
+    if(visible_motion_clock()&&!widgets_paused){
         struct tm date;if(date_now(&date)){
             unsigned phase=clock_phase_now(&date);
             if(date.tm_yday!=s_date.tm_yday||date.tm_year!=s_date.tm_year){refresh_days();return APP_REDRAW_PAGE;}

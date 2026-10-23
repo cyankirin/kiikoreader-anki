@@ -1,8 +1,12 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：卡组存储实现：.akd 读写、列表计数、日计数同步、定长进度原地更新与
- *       简化 SM-2 调度。/ English: Deck storage: .akd read/write, list counts,
- *       day-counter sync, fixed-record progress patching and a simplified
- *       SM-2 scheduler.
+ *       简化 SM-2 调度。双根：TF 卡在位且可写时写 /sdcard/anki，否则写
+ *       /flash/anki；读取与删除覆盖两个根，同 id 时活动根优先。
+ * English: Deck storage: .akd read/write, list counts, day-counter sync,
+ *       fixed-record progress patching and a simplified SM-2 scheduler.
+ *       Dual-root: writes land on /sdcard/anki when the TF card is present
+ *       and writable, else on /flash/anki; reads and deletes cover both
+ *       roots, the active root winning on a shared id.
  */
 #include "anki_store.h"
 
@@ -20,6 +24,7 @@
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "read_pico_sd.h"
 #endif
 
 #ifdef _WIN32
@@ -40,6 +45,12 @@
 #define AKD_VERSION 1u
 #define CARD_RECORD 52
 #define HEADER_BYTES 64
+
+// 列表去重表容量：界面最多展示 96 个卡组，128 留有余量；超出后仍继续枚举，
+// 只是同 id 可能重复出现一次。/ Dedup table capacity: the UI shows at most
+// 96 decks, so 128 leaves headroom; past it enumeration continues and a
+// shared id may appear once more.
+#define ANKI_LIST_SEEN_MAX 128
 
 // 2024-01-01 之前的 RTC 视为未对时。/ An RTC before 2024-01-01 counts as unset.
 #define ANKI_RTC_VALID_SECONDS 1704067200
@@ -125,18 +136,45 @@ int64_t anki_day_now(void) {
     return (int64_t)((now + ANKI_TZ_OFFSET) / 86400);
 }
 
-static void deck_path(int64_t deck_id, char out[64]) {
-    snprintf(out, 64, "%s/%lld.akd", ANKI_DIR, (long long)deck_id);
+static void deck_path_in(const char* root, int64_t deck_id, char out[64]) {
+    snprintf(out, 64, "%s/%lld.akd", root, (long long)deck_id);
 }
 
-static esp_err_t ensure_dir(void) {
-    if (anki_mkdir(ANKI_DIR) == 0) return ESP_OK;
+static esp_err_t ensure_dir_for(const char* root) {
+    if (anki_mkdir(root) == 0) return ESP_OK;
     if (errno == EEXIST) {
         struct stat st;
-        if (stat(ANKI_DIR, &st) == 0 && S_ISDIR(st.st_mode)) return ESP_OK;
+        if (stat(root, &st) == 0 && S_ISDIR(st.st_mode)) return ESP_OK;
     }
-    ESP_LOGW(TAG, "anki dir unavailable: %s (%d)", ANKI_DIR, errno);
+    ESP_LOGW(TAG, "anki dir unavailable: %s (%d)", root, errno);
     return ESP_FAIL;
+}
+
+// ---------------------------------------------------------------- 双根解析
+
+const char* anki_root_from_tf_ready(bool tf_ready) {
+    return tf_ready ? ANKI_DIR_TF : ANKI_DIR;
+}
+
+const char* anki_store_active_root(void) {
+#ifdef ESP_PLATFORM
+    // 探测期间（ESP_ERR_NOT_FINISHED）按未挂载处理：先写内部闪存，拔卡
+    // 误判最多让本次导入落错根，不会写坏卡组。/ While probing
+    // (ESP_ERR_NOT_FINISHED) treat the card as absent: imports land on
+    // internal flash, so a false negative only misroots one import.
+    read_pico_sd_info_t info = {0};
+    if (read_pico_sd_get_info(&info) == ESP_OK && info.mounted) {
+        return anki_root_from_tf_ready(true);
+    }
+#endif
+    return anki_root_from_tf_ready(false);
+}
+
+/// 两个根：活动根优先，另一个根兜底。/ The two roots: active first, other as fallback.
+static void anki_roots(const char** active, const char** other) {
+    const char* root = anki_store_active_root();
+    *active = root;
+    *other = strcmp(root, ANKI_DIR_TF) == 0 ? ANKI_DIR : ANKI_DIR_TF;
 }
 
 // ---------------------------------------------------------------- 写盘
@@ -197,7 +235,7 @@ static void write_notetype(cursor_t* c, const anki_notetype_t* nt) {
 
 static esp_err_t write_deck_file(const anki_import_t* imp, const anki_deck_info_t* deck,
                                  const char* source, const subset_t* sub, int64_t day,
-                                 int64_t last_rtc_day) {
+                                 int64_t last_rtc_day, const char* root) {
     // 先量尺寸再落盘：一次分配，避免半边文件。/ Measure first, then write once.
     size_t need = HEADER_BYTES + strlen(deck->name) + 1 + strlen(source ? source : "") + 1;
     int note_total = 0, notetype_total = 0;
@@ -288,7 +326,7 @@ static esp_err_t write_deck_file(const anki_import_t* imp, const anki_deck_info_
     (void)header_end;
 
     char path[64];
-    deck_path(deck->id, path);
+    deck_path_in(root, deck->id, path);
     FILE* f = fopen(path, "wb");
     if (!f) {
         ESP_LOGW(TAG, "write open %s failed (%d)", path, errno);
@@ -332,9 +370,13 @@ static void remap_due(anki_import_t* imp, int64_t rtc_day, int64_t device_day) {
 esp_err_t anki_store_import(const char* path, int* out_imported) {
     if (!path) return ESP_ERR_INVALID_ARG;
     if (out_imported) *out_imported = 0;
+    // TF 卡在位且可写时整包导入落到 TF 卡，内部闪存留给系统与书籍。
+    // / With the TF card present and writable the whole import lands there,
+    // leaving internal flash to the system and books.
+    const char* root = anki_store_active_root();
     esp_err_t err = book_store_ensure_flash();
     if (err != ESP_OK) return err;
-    err = ensure_dir();
+    err = ensure_dir_for(root);
     if (err != ESP_OK) return err;
 
     anki_import_t imp = {0};
@@ -355,7 +397,7 @@ esp_err_t anki_store_import(const char* path, int* out_imported) {
         // whole collection; each deck then writes only its own cards.
         if (d == 0) remap_due(&imp, rtc_day, rtc_day > 0 ? rtc_day : 0);
         err = write_deck_file(&imp, &imp.decks[d], path, &sub, rtc_day > 0 ? rtc_day : 0,
-                              rtc_day);
+                              rtc_day, root);
         free(sub.note_slots);
         free(sub.notetype_slots);
         if (err == ESP_OK) {
@@ -503,10 +545,19 @@ void anki_store_unload(anki_deck_t* deck) {
 esp_err_t anki_store_load(int64_t deck_id, anki_deck_t* out) {
     if (!out) return ESP_ERR_INVALID_ARG;
     memset(out, 0, sizeof(*out));
+    // 先试活动根，读不到再试另一个根：拔卡后 TF 根的卡组仍可学习。
+    // / Try the active root first, then the other: a TF-rooted deck stays
+    // studyable after the card is removed.
+    const char* roots[2];
+    anki_roots(&roots[0], &roots[1]);
     char path[64];
-    deck_path(deck_id, path);
     size_t len = 0;
-    uint8_t* data = read_whole_file(path, &len);
+    uint8_t* data = NULL;
+    for (int i = 0; i < 2; ++i) {
+        deck_path_in(roots[i], deck_id, path);
+        data = read_whole_file(path, &len);
+        if (data) break;
+    }
     if (!data) return ESP_ERR_NOT_FOUND;
 
     anki_deck_summary_t summary = {0};
@@ -659,46 +710,68 @@ esp_err_t anki_store_list(anki_deck_visit_fn visit, void* ctx) {
     if (!visit) return ESP_ERR_INVALID_ARG;
     esp_err_t err = book_store_ensure_flash();
     if (err != ESP_OK) return err;
-    DIR* dir = opendir(ANKI_DIR);
-    if (!dir) return ESP_OK; // 还没有卡组目录即空列表 / no directory yet means empty
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        const char* dot = strrchr(entry->d_name, '.');
-        if (!dot || strcasecmp(dot, ".akd") != 0) continue;
-        char path[320];
-        if (snprintf(path, sizeof(path), "%s/%s", ANKI_DIR, entry->d_name) >= (int)sizeof(path)) {
-            continue;
-        }
-        size_t len = 0;
-        uint8_t* data = read_whole_file(path, &len);
-        if (!data) continue;
-        anki_deck_summary_t summary = {0};
-        uint32_t card_offset = 0;
-        int64_t day = 0, last_rtc = 0;
-        bool ok = header_ok(data, len, &summary, &card_offset, &day, &last_rtc);
-        if (ok) {
-            // 日计数按 RTC 推进后再数到期。/ Advance the day counter before counting due.
-            int64_t today = anki_day_now();
-            if (today > last_rtc && last_rtc > 0) day += today - last_rtc;
-            else if (last_rtc == 0 && today > 0) day = today;
-            for (int i = 0; i < summary.total; ++i) {
-                const uint8_t* rec = data + card_offset + (size_t)i * CARD_RECORD;
-                // 记录布局：id(8) nid(8) ord(4) type(4) queue(4) due(4) ...
-                // Record layout: id(8) nid(8) ord(4) type(4) queue(4) due(4) ...
-                reader_t cr = {.p = rec, .len = (size_t)CARD_RECORD, .at = 16, .overflow = false};
-                r_u32(&cr); // ord
-                r_u32(&cr); // type
-                uint32_t queue = r_u32(&cr);
-                uint32_t due = r_u32(&cr);
-                if (queue == 0) ++summary.fresh;
-                else if (queue >= 1 && queue <= 3 && (int64_t)due <= day) ++summary.due;
+    // 枚举两个根，活动根在前；同 id 只报活动根的那份（去重表记住已见 id）。
+    // / Walk both roots, active first; a shared id is reported once, from the
+    // active root (the dedup table remembers ids already seen).
+    const char* roots[2];
+    anki_roots(&roots[0], &roots[1]);
+    int64_t seen[ANKI_LIST_SEEN_MAX];
+    int seen_count = 0;
+    for (int r = 0; r < 2; ++r) {
+        DIR* dir = opendir(roots[r]);
+        if (!dir) continue; // 根不存在即该根为空 / a missing root is an empty root
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != NULL) {
+            const char* dot = strrchr(entry->d_name, '.');
+            if (!dot || strcasecmp(dot, ".akd") != 0) continue;
+            int64_t id = strtoll(entry->d_name, NULL, 10);
+            bool duplicate = false;
+            for (int i = 0; i < seen_count; ++i) {
+                if (seen[i] == id) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            if (seen_count < ANKI_LIST_SEEN_MAX) seen[seen_count++] = id;
+            char path[320];
+            if (snprintf(path, sizeof(path), "%s/%s", roots[r], entry->d_name) >= (int)sizeof(path)) {
+                continue;
+            }
+            size_t len = 0;
+            uint8_t* data = read_whole_file(path, &len);
+            if (!data) continue;
+            anki_deck_summary_t summary = {0};
+            uint32_t card_offset = 0;
+            int64_t day = 0, last_rtc = 0;
+            bool ok = header_ok(data, len, &summary, &card_offset, &day, &last_rtc);
+            if (ok) {
+                // 日计数按 RTC 推进后再数到期。/ Advance the day counter before counting due.
+                int64_t today = anki_day_now();
+                if (today > last_rtc && last_rtc > 0) day += today - last_rtc;
+                else if (last_rtc == 0 && today > 0) day = today;
+                for (int i = 0; i < summary.total; ++i) {
+                    const uint8_t* rec = data + card_offset + (size_t)i * CARD_RECORD;
+                    // 记录布局：id(8) nid(8) ord(4) type(4) queue(4) due(4) ...
+                    // Record layout: id(8) nid(8) ord(4) type(4) queue(4) due(4) ...
+                    reader_t cr = {.p = rec, .len = (size_t)CARD_RECORD, .at = 16, .overflow = false};
+                    r_u32(&cr); // ord
+                    r_u32(&cr); // type
+                    uint32_t queue = r_u32(&cr);
+                    uint32_t due = r_u32(&cr);
+                    if (queue == 0) ++summary.fresh;
+                    else if (queue >= 1 && queue <= 3 && (int64_t)due <= day) ++summary.due;
+                }
+            }
+            free(data);
+            if (!ok) continue;
+            if (!visit(&summary, ctx)) {
+                closedir(dir);
+                return ESP_OK;
             }
         }
-        free(data);
-        if (!ok) continue;
-        if (!visit(&summary, ctx)) break;
+        closedir(dir);
     }
-    closedir(dir);
     return ESP_OK;
 }
 
@@ -847,11 +920,20 @@ esp_err_t anki_store_save_card(anki_deck_t* deck, int card_index) {
 }
 
 esp_err_t anki_store_delete(int64_t deck_id) {
-    char path[64];
-    deck_path(deck_id, path);
-    if (unlink(path) != 0 && errno != ENOENT) {
-        ESP_LOGW(TAG, "delete %s failed (%d)", path, errno);
-        return ESP_FAIL;
+    // 两个根的同 id 文件都删：只删活动根的话，拔卡后另一根的副本会让
+    // 幽灵卡组重新出现在列表里。/ Delete the same id under both roots:
+    // removing only the active copy lets the other root's duplicate resurface
+    // as a ghost deck once the card is pulled.
+    const char* roots[2];
+    anki_roots(&roots[0], &roots[1]);
+    esp_err_t result = ESP_OK;
+    for (int i = 0; i < 2; ++i) {
+        char path[64];
+        deck_path_in(roots[i], deck_id, path);
+        if (unlink(path) != 0 && errno != ENOENT) {
+            ESP_LOGW(TAG, "delete %s failed (%d)", path, errno);
+            result = ESP_FAIL;
+        }
     }
-    return ESP_OK;
+    return result;
 }

@@ -8,6 +8,16 @@ User-visible changes by release; see [README](../README.md) for usage.
 （暂无 / None yet）
 
 
+## 0.3.3-rc99.04 / 2026-10-23
+
+- 套用瘦身 sdkconfig 释放应用分区空间：日志默认级别与编译上限降到 ERROR（WARN 及以下全部编出，rc99 基线本已降到 WARN 并关闭 ESP_ERR_TO_NAME_LOOKUP 查找表，本轮再收一级），应用分区余量从 rc99.03 的 6.0KB 回升到 34.6KB；行为仅少控制台警告及以下日志与错误码名字符串，刷机验证时如需警告日志可把日志级别调回 WARN。
+  Apply the slimming sdkconfig to free app-partition space: the default log level and compile-time cap drop to ERROR (WARN and below compile out; the rc99 baseline had already dropped to WARN with the ESP_ERR_TO_NAME_LOOKUP table disabled, and this round tightens one more notch), lifting the app-partition margin from 6.0KB on rc99.03 to 34.6KB; the only behaviour change is fewer console warning-and-below logs and no error-code name strings — set the log level back to WARN when you need warnings during flashing validation.
+- Anki 卡组支持从 TF 卡加载/存储：TF 卡在位且可写时导入落到 /sdcard/anki，否则仍写内部闪存 /flash/anki；载入先试活动根、找不到再试另一个根，列表按卡组 id 去重（活动根优先），删除同时清理两个根避免拔卡后幽灵卡组；学习会话在内存里继续进行，导入中途拔卡会明确提示「TF 卡已拔出」。
+  Anki decks now load and store from the TF card: with the card present and writable imports land on /sdcard/anki, otherwise they still go to internal flash /flash/anki; loading tries the active root first then the other, the list dedupes by deck id (active root first), and deletion clears both roots so a pulled card cannot leave ghost decks; study sessions continue in memory, and pulling the card mid-import reports "TF card removed".
+- PSRAM 不足时按需暂停首页组件：可用 PSRAM 低于 512KB 时跳过首页时钟/日历组件绘制并释放可重建的表盘底图，组件区显示「内存紧张，首页组件已暂停」，余量恢复后下一帧自动恢复；「继续阅读」卡与闭环目标区不受影响。
+  Home widgets pause on demand when PSRAM runs low: below 512KB of free PSRAM the clock/calendar widgets are skipped and the rebuildable clock base is released, the widget area shows "Paused: low memory", and they return automatically once the margin recovers; the resume card and closed-loop goal areas are unaffected.
+
+
 ## 0.3.3-rc99.03 / 2026-10-23
 
 - Anki 单选/多选卡片背面自动强调正确答案：自动识别「选项字段为连续单字母（A、B、C、D…，至少两个）且另有字段的值是这些选项字母的子集（如 "AC"）」的选择题模型，背面按题干、选项、答案、备注逐行纯文本排版，正确选项与答案行以反色（黑底白字）绘制，墨水屏上清晰醒目；正面渲染与普通卡片行为不变，背面模板里那段只在高亮正确选项的 JavaScript 不再依赖设备执行。

@@ -443,6 +443,11 @@ static void session_grade(anki_grade_t grade) {
     if (s_view != ANKI_VIEW_STUDY || !SESS()->show_back) return;
     int index = SESS()->session[SESS()->session_pos];
     anki_schedule(&SESS()->deck, index, grade);
+    // 进度写回失败（如学习途中拔出 TF 卡）不打断会话：卡组已在内存里，
+    // 本次评分照常继续，落盘等下次保存重试。/ A failed progress write (the
+    // TF card pulled mid-study, say) never interrupts the session: the deck
+    // is in memory, this grade proceeds, and persistence retries on the next
+    // save.
     anki_store_save_card(&SESS()->deck, index);
     ++SESS()->studied;
     if (grade == ANKI_GRADE_AGAIN) ++SESS()->again;
@@ -673,6 +678,11 @@ static void import_selected(int index) {
 
 static app_redraw_t run_import(app_ctx_t* ctx) {
     int imported = 0;
+    // 先记下源文件是否在 TF 卡上：失败时才能把「中途拔卡」和「文件损坏」
+    // 分开说，而不是笼统一句失败。/ Remember whether the source lives on the
+    // TF card so a failure can tell "card pulled mid-import" apart from
+    // "file corrupt" instead of one generic message.
+    bool from_tf = strncmp(s_pending_path, "/sdcard", 7) == 0;
     esp_err_t err = anki_store_import(s_pending_path, &imported);
     s_pending_import = false;
     s_pending_path[0] = 0;
@@ -687,7 +697,10 @@ static app_redraw_t run_import(app_ctx_t* ctx) {
         // switching back to the deck list would swallow the reason, leaving
         // the user with a list that appears dead. The back key (see on_key)
         // exits this state.
-        message_set("导入失败，文件可能损坏");
+        read_pico_sd_info_t info = {0};
+        read_pico_sd_get_info(&info);
+        message_set(from_tf && !info.mounted ? "TF 卡已拔出，导入已中断"
+                                             : "导入失败，文件可能损坏");
         s_view = ANKI_VIEW_BUSY;
     }
     render(ctx, ctx->fb);

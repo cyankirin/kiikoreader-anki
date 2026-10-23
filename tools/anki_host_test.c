@@ -48,10 +48,10 @@ static int checks;
         }                                                                                         \
     } while (0)
 
-static void clean_deck_dir(void) {
+static void clean_dir(const char* root) {
     // 宿主目录树可能不存在，先逐级建好。/ The host tree may not exist yet; build it.
     char path[320];
-    snprintf(path, sizeof(path), "%s", ANKI_DIR);
+    snprintf(path, sizeof(path), "%s", root);
     for (char* p = path + 1; *p; ++p) {
         if (*p == '/' || *p == '\\') {
             *p = 0;
@@ -60,18 +60,20 @@ static void clean_deck_dir(void) {
         }
     }
     test_mkdir(path);
-    DIR* dir = opendir(ANKI_DIR);
+    DIR* dir = opendir(root);
     if (!dir) return;
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         const char* dot = strrchr(entry->d_name, '.');
         if (!dot || strcasecmp(dot, ".akd") != 0) continue;
         char path[320];
-        snprintf(path, sizeof(path), "%s/%s", ANKI_DIR, entry->d_name);
+        snprintf(path, sizeof(path), "%s/%s", root, entry->d_name);
         unlink(path);
     }
     closedir(dir);
 }
+
+static void clean_deck_dir(void) { clean_dir(ANKI_DIR); }
 
 // ---------------------------------------------------------------- JSON
 
@@ -663,6 +665,120 @@ static void test_store(void) {
     CHECK(list_seen == 0);
 }
 
+// ---------------------------------------------------------------- 双根
+
+static void test_roots(void) {
+    printf("== roots ==\n");
+    // 纯映射：TF 就绪 → TF 根，否则内部闪存根。/ Pure mapping: TF-ready picks
+    // the TF root, anything else the internal-flash root.
+    CHECK(strcmp(anki_root_from_tf_ready(false), ANKI_DIR) == 0);
+    CHECK(strcmp(anki_root_from_tf_ready(true), ANKI_DIR_TF) == 0);
+    CHECK(strcmp(anki_root_from_tf_ready(true), ANKI_DIR) != 0);
+    // 宿主不探测 TF：活动根恒为 ANKI_DIR（-DANKI_DIR 机制不变）。
+    // / The host probes no TF, so the active root is always ANKI_DIR (the
+    // -DANKI_DIR mechanism is unchanged).
+    CHECK(strcmp(anki_store_active_root(), ANKI_DIR) == 0);
+}
+
+/// 收集某根下 .akd 的卡组 id。/ Collect deck ids from a root's .akd files.
+static int collect_deck_ids(const char* root, int64_t* ids, int max) {
+    DIR* dir = opendir(root);
+    if (!dir) return 0;
+    int count = 0;
+    struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL && count < max) {
+        const char* dot = strrchr(entry->d_name, '.');
+        if (!dot || strcasecmp(dot, ".akd") != 0) continue;
+        ids[count++] = strtoll(entry->d_name, NULL, 10);
+    }
+    closedir(dir);
+    return count;
+}
+
+/// 整文件复制，供双根测试搭建“同 id 两份”。/ Whole-file copy so the dual-root
+/// test can stage two copies of one id.
+static bool copy_file(const char* src, const char* dst) {
+    FILE* in = fopen(src, "rb");
+    if (!in) return false;
+    FILE* out = fopen(dst, "wb");
+    if (!out) {
+        fclose(in);
+        return false;
+    }
+    char buffer[4096];
+    size_t got;
+    bool ok = true;
+    while ((got = fread(buffer, 1, sizeof(buffer), in)) > 0) {
+        if (fwrite(buffer, 1, got, out) != got) {
+            ok = false;
+            break;
+        }
+    }
+    if (ferror(in)) ok = false;
+    ok = fclose(out) == 0 && ok;
+    fclose(in);
+    return ok;
+}
+
+static void test_dual_root(void) {
+    printf("== dual root ==\n");
+    clean_dir(ANKI_DIR);
+    clean_dir(ANKI_DIR_TF);
+    int imported = 0;
+    CHECK(anki_store_import(FIX "/basic-v2.apkg", &imported) == ESP_OK);
+    CHECK(imported == 2);
+
+    // 宿主活动根是 ANKI_DIR：两个卡组都落在那里，TF 根为空。
+    // / The host's active root is ANKI_DIR, so both decks land there and the
+    // TF root stays empty.
+    int64_t ids[4] = {0, 0, 0, 0};
+    int id_count = collect_deck_ids(ANKI_DIR, ids, 4);
+    CHECK(id_count == 2);
+    CHECK(collect_deck_ids(ANKI_DIR_TF, ids, 4) == 0);
+    if (id_count != 2) return;
+
+    char flash_path[320], tf_path[320];
+    snprintf(flash_path, sizeof(flash_path), "%s/%lld.akd", ANKI_DIR, (long long)ids[0]);
+    snprintf(tf_path, sizeof(tf_path), "%s/%lld.akd", ANKI_DIR_TF, (long long)ids[0]);
+    // 同 id 再放一份到 TF 根。/ Stage a second copy of the same id on the TF root.
+    CHECK(copy_file(flash_path, tf_path));
+
+    // 列表按 id 去重：仍只有两个卡组。/ The list dedupes by id: still two decks.
+    list_seen = 0;
+    CHECK(anki_store_list(visit_summary, NULL) == ESP_OK);
+    CHECK(list_seen == 2);
+
+    // 载入走活动根（ANKI_DIR）。/ Load prefers the active root (ANKI_DIR).
+    anki_deck_t deck = {0};
+    CHECK(anki_store_load(ids[0], &deck) == ESP_OK);
+    CHECK(strncmp(deck.path, ANKI_DIR, strlen(ANKI_DIR)) == 0);
+    anki_store_unload(&deck);
+
+    // 删掉活动根那份，TF 根仍在：载入回落到 TF 根，path 记录实际读到的位置。
+    // / Remove the active-root copy; the TF copy remains and load falls back
+    // to it, path recording where it was actually read from.
+    CHECK(unlink(flash_path) == 0);
+    CHECK(anki_store_load(ids[0], &deck) == ESP_OK);
+    CHECK(strncmp(deck.path, ANKI_DIR_TF, strlen(ANKI_DIR_TF)) == 0);
+    anki_store_unload(&deck);
+
+    // 删除同时清理两个根：幽灵卡组不回来。/ Delete clears both roots: no ghost.
+    CHECK(anki_store_delete(ids[0]) == ESP_OK);
+    struct stat st;
+    CHECK(stat(tf_path, &st) != 0);
+    CHECK(stat(flash_path, &st) != 0);
+
+    // 收尾：删掉另一个卡组并清空两个根，避免影响后续测试。
+    // / Wrap up: delete the other deck and empty both roots so later tests
+    // stay unaffected.
+    CHECK(anki_store_delete(ids[1]) == ESP_OK);
+    clean_dir(ANKI_DIR);
+    clean_dir(ANKI_DIR_TF);
+    list_seen = 0;
+    CHECK(anki_store_list(visit_summary, NULL) == ESP_OK);
+    CHECK(list_seen == 0);
+}
+
 int main(void) {
     test_json();
     test_sqlite();
@@ -677,6 +793,8 @@ int main(void) {
     test_render();
     test_choice_render();
     test_store();
+    test_roots();
+    test_dual_root();
     if (failures) {
         printf("anki_host_test: FAIL (%d of %d checks)\n", failures, checks);
         return 1;
