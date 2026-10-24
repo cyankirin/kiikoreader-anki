@@ -20,6 +20,12 @@
     if(device==='metalio'&&(manifest.board!=='metalio47'||manifest.project!==model.project||manifest.pico_ota?.layout!=='metalio-s31-dual-5m-v1'))throw Error('Metalio 分区或项目身份不匹配。');
     return model;
   }
+  function appVersion(bytes,model){
+    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
+    if(bytes.length<288||bytes[0]!==0xe9||view.getUint16(12,true)!==model.chip||view.getUint32(32,true)!==0xabcd5432)throw Error('下载文件的芯片身份不匹配。');
+    const field=offset=>{const raw=bytes.slice(offset,offset+32);if(!raw.includes(0))throw Error('固件标识损坏。');return new TextDecoder().decode(raw).split('\0')[0];};
+    if(field(80)!==model.project)throw Error('固件项目与所选设备不同，已停止安装。');return field(48);
+  }
   async function prepare(manifest,manifestURL,archiveFiles,device='pico'){
     const model=validate(manifest,device), snapshot=JSON.parse(JSON.stringify(manifest));
     const urls=[],verified=[];let disposed=false;
