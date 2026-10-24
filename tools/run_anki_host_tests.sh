@@ -21,4 +21,9 @@ gcc "${flags[@]}" -Imain/anki -Imain/book -Imain -Itools/anki_stubs \
     tools/anki_stubs/miniz_tinfl.c \
     -DANKI_DIR="\"build/anki-tests/flash/anki\"" \
     -o build/anki-tests/anki
-build/anki-tests/anki
+# Windows 宿主上 gcc 会在 -o 目标后补 .exe；按实际产物运行，避免误跑
+# 上一次遗留的旧二进制。/ On Windows hosts gcc appends .exe to the -o target;
+# run the artifact actually produced so a stale leftover binary is not executed.
+test_bin=build/anki-tests/anki
+if [ -x build/anki-tests/anki.exe ]; then test_bin=build/anki-tests/anki.exe; fi
+"$test_bin"

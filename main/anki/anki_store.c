@@ -553,20 +553,25 @@ esp_err_t anki_store_load(int64_t deck_id, anki_deck_t* out) {
     char path[64];
     size_t len = 0;
     uint8_t* data = NULL;
-    for (int i = 0; i < 2; ++i) {
-        deck_path_in(roots[i], deck_id, path);
-        data = read_whole_file(path, &len);
-        if (data) break;
-    }
-    if (!data) return ESP_ERR_NOT_FOUND;
-
+    bool found_any = false;
     anki_deck_summary_t summary = {0};
     uint32_t card_offset = 0;
     int64_t day = 0, last_rtc = 0;
-    if (!header_ok(data, len, &summary, &card_offset, &day, &last_rtc)) {
+    for (int i = 0; i < 2; ++i) {
+        deck_path_in(roots[i], deck_id, path);
+        data = read_whole_file(path, &len);
+        if (!data) continue;
+        found_any = true;
+        if (header_ok(data, len, &summary, &card_offset, &day, &last_rtc)) break;
+        // 活动根文件损坏时继续试另一个根：截断/损坏的 .akd 不应挡住另一根
+        // 的完好副本；两个根都坏才按损坏上报。/ A damaged active-root file
+        // falls through to the other root: a truncated/corrupt .akd must not
+        // shadow a healthy copy; only when both roots fail do we report
+        // corruption.
         free(data);
-        return ESP_ERR_INVALID_SIZE;
+        data = NULL;
     }
+    if (!data) return found_any ? ESP_ERR_INVALID_SIZE : ESP_ERR_NOT_FOUND;
     out->deck_id = deck_id;
     snprintf(out->name, sizeof(out->name), "%s", summary.name);
     out->day = day;
@@ -710,9 +715,10 @@ esp_err_t anki_store_list(anki_deck_visit_fn visit, void* ctx) {
     if (!visit) return ESP_ERR_INVALID_ARG;
     esp_err_t err = book_store_ensure_flash();
     if (err != ESP_OK) return err;
-    // 枚举两个根，活动根在前；同 id 只报活动根的那份（去重表记住已见 id）。
-    // / Walk both roots, active first; a shared id is reported once, from the
-    // active root (the dedup table remembers ids already seen).
+    // 枚举两个根，活动根在前；同 id 只报活动根的那份（去重表只收头校验
+    // 通过的 id，损坏副本不占位）。/ Walk both roots, active first; a shared
+    // id is reported once, from the active root (the dedup table only keeps
+    // ids whose header checks out, so a damaged copy takes no slot).
     const char* roots[2];
     anki_roots(&roots[0], &roots[1]);
     int64_t seen[ANKI_LIST_SEEN_MAX];
@@ -733,7 +739,6 @@ esp_err_t anki_store_list(anki_deck_visit_fn visit, void* ctx) {
                 }
             }
             if (duplicate) continue;
-            if (seen_count < ANKI_LIST_SEEN_MAX) seen[seen_count++] = id;
             char path[320];
             if (snprintf(path, sizeof(path), "%s/%s", roots[r], entry->d_name) >= (int)sizeof(path)) {
                 continue;
@@ -765,6 +770,12 @@ esp_err_t anki_store_list(anki_deck_visit_fn visit, void* ctx) {
             }
             free(data);
             if (!ok) continue;
+            // 头校验通过后才把 id 记入去重表：否则活动根里截断/损坏的 .akd 会
+            // 抢先占位，把另一个根里同 id 的完好副本挡出列表。/ Record the id
+            // only after its header checks out: otherwise a truncated/corrupt
+            // .akd on the active root takes the slot first and shadows the
+            // healthy same-id copy on the other root.
+            if (seen_count < ANKI_LIST_SEEN_MAX) seen[seen_count++] = id;
             if (!visit(&summary, ctx)) {
                 closedir(dir);
                 return ESP_OK;

@@ -720,6 +720,23 @@ static bool copy_file(const char* src, const char* dst) {
     return ok;
 }
 
+/// 把文件截断到前 keep 字节（移植式重写，不依赖 ftruncate）。/ Truncate a
+/// file to its first keep bytes by rewriting it, so no ftruncate is needed.
+static bool truncate_file(const char* path, long keep) {
+    if (keep <= 0) return false;
+    FILE* in = fopen(path, "rb");
+    if (!in) return false;
+    char buffer[4096];
+    size_t want = (size_t)keep < sizeof(buffer) ? (size_t)keep : sizeof(buffer);
+    size_t got = fread(buffer, 1, want, in);
+    fclose(in);
+    if (got == 0) return false;
+    FILE* out = fopen(path, "wb");
+    if (!out) return false;
+    bool ok = fwrite(buffer, 1, got, out) == got;
+    return fclose(out) == 0 && ok;
+}
+
 static void test_dual_root(void) {
     printf("== dual root ==\n");
     clean_dir(ANKI_DIR);
@@ -760,6 +777,42 @@ static void test_dual_root(void) {
     CHECK(unlink(flash_path) == 0);
     CHECK(anki_store_load(ids[0], &deck) == ESP_OK);
     CHECK(strncmp(deck.path, ANKI_DIR_TF, strlen(ANKI_DIR_TF)) == 0);
+    anki_store_unload(&deck);
+
+    // 损坏文件遮蔽修复：活动根放截断的同 id .akd，另一根保留完好副本。
+    // / Corrupted-file shadowing fix: stage a truncated same-id .akd on the
+    // active root while the other root keeps a healthy copy.
+    CHECK(copy_file(tf_path, flash_path));
+    // 先记下完好副本的卡片数作参照（卡组可能 0 卡，不能硬编码非零）。
+    // / Record the healthy copy's card count as reference (a deck may hold
+    // zero cards, so a hardcoded non-zero expectation would be wrong).
+    CHECK(anki_store_load(ids[0], &deck) == ESP_OK);
+    int healthy_cards = deck.card_count;
+    anki_store_unload(&deck);
+    CHECK(truncate_file(flash_path, 32)); // 少于 64 字节头，header_ok 必败 / under the 64-byte header, header_ok must fail
+
+    // 先收掉 ids[1]，让随后列表里只有 ids[0]，可对汇总逐项断言。
+    // / Drop ids[1] first so the following list holds ids[0] alone and the
+    // summary can be asserted field by field.
+    CHECK(anki_store_delete(ids[1]) == ESP_OK);
+
+    // 列表仍显示该卡组（去重表只收头校验通过的 id），且汇总与完好副本一致。
+    // / The list still shows the deck (the dedup table only keeps ids whose
+    // header checks out), and the summary matches the healthy copy.
+    list_seen = 0;
+    CHECK(anki_store_list(visit_summary, NULL) == ESP_OK);
+    CHECK(list_seen == 1);
+    if (list_seen == 1) {
+        CHECK(list_first.deck_id == ids[0]);
+        CHECK(list_first.total == healthy_cards);
+    }
+
+    // 载入跳过活动根的损坏副本，从 TF 根读到完好副本。
+    // / Load skips the damaged active-root copy and reads the healthy copy
+    // from the TF root.
+    CHECK(anki_store_load(ids[0], &deck) == ESP_OK);
+    CHECK(strncmp(deck.path, ANKI_DIR_TF, strlen(ANKI_DIR_TF)) == 0);
+    CHECK(deck.card_count == healthy_cards); // 读到的是完好副本 / the healthy copy was read
     anki_store_unload(&deck);
 
     // 删除同时清理两个根：幽灵卡组不回来。/ Delete clears both roots: no ghost.

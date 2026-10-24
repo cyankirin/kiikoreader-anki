@@ -38,7 +38,15 @@
 
 #define ROW_H 92
 #define LIST_MAX 96
-#define LINE_MAX 220
+// 单卡正文行数上限：超长卡片到此封顶，避免折行数组无界增长。220 时超长
+// 卡片会被静默截断，提到 400 后常见长卡可完整显示；会话结构体走 PSRAM
+// 分配，增量约 3KB（line_off/line_len 各 +1440B、line_invert +180B），
+// 内部 RAM 不受影响。/ Per-card body line cap: overlong cards stop here so
+// the wrap arrays cannot grow without bound. At 220 long cards were silently
+// truncated; 400 shows common long cards in full. The session struct is
+// PSRAM-allocated, so the ~3KB growth (line_off/line_len +1440B each,
+// line_invert +180B) does not touch internal RAM.
+#define LINE_MAX 400
 // 折行探测与绘制行缓冲的容量，即单行字节上限：任何长度的无空格串都会
 // 在宽度内被切短，测量值永不小于真实占用。/ Probe/line buffer capacity,
 // i.e. the byte cap per line: any no-space run is cut to fit the width and
@@ -198,6 +206,13 @@ static void size_text(off_t size, char out[24]) {
 // ---------------------------------------------------------------- 列表扫描
 
 static bool visit_deck(const anki_deck_summary_t* summary, void* ctx) {
+    // 0 卡空卡组不进列表：导入 .apkg 常带一个没有卡片的 Default，点进去也
+    // 无卡可学，用户多次被它困扰；store 层语义不变（仍枚举、仍可删），
+    // 只在界面列表层过滤。/ Keep 0-card decks out of the list: an imported
+    // .apkg often carries a card-less Default that teaches nothing when
+    // opened and has annoyed users repeatedly; the store layer is unchanged
+    // (still enumerated, still deletable) and only the UI list filters.
+    if (summary->total <= 0) return true;
     anki_lists_t* lists = (anki_lists_t*)ctx;
     if (lists->deck_count >= LIST_MAX) return false;
     lists->decks[lists->deck_count++] = *summary;

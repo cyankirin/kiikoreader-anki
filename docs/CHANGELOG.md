@@ -16,8 +16,8 @@
   Fix corrupted-file shadowing in the Anki TF dual-root store: the list only records a deck id after its header check passes, and loading falls through to the other root when the active root's file is damaged, so a truncated/corrupt .akd no longer hides a healthy copy of the same deck id on the other root.
 - Anki 卡组列表隐藏 0 卡空卡组：空 Default 等无卡片卡组不再出现在列表里，避免误选；存储层语义不变。
   Hide 0-card decks in the Anki deck list: empty decks such as a bare Default no longer show up to be picked by mistake; store-layer semantics are unchanged.
-- Anki 超长卡片行上限从 220 提到 400：超长正文不再被静默截断，会话缓冲区随 PSRAM 分配，增量约 6.4KB。
-  Raise the Anki long-card line cap from 220 to 400: overlong text is no longer silently truncated; the session buffer lives in PSRAM, adding roughly 6.4KB.
+- Anki 超长卡片行上限从 220 提到 400：超长正文不再被静默截断，会话缓冲区随 PSRAM 分配，增量约 3KB，内部 RAM 不受影响。
+  Raise the Anki long-card line cap from 220 to 400: overlong text is no longer silently truncated; the session buffer lives in PSRAM, adding roughly 3KB with no internal-RAM cost.
 - 构建产物额外输出带版本号的 `Read_Pico-<版本>.bin`（如 `Read_Pico-0.3.3-rc100.01.bin`），便于发布与 OTA 核对；原 `Read_Pico.bin` 保持不变。
   The build now also stages a versioned image `Read_Pico-<version>.bin` (e.g. `Read_Pico-0.3.3-rc100.01.bin`) for release/OTA checks; the original `Read_Pico.bin` stays unchanged.
 
