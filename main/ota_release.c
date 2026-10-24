@@ -10,10 +10,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 版本拆成 5 段：主、次、修、rc 序号、rc 小修订。/ A version splits into five
+// fields: major, minor, patch, rc index, rc sub-revision.
+#define PICO_VERSION_PARTS 5
+// 正式版排在同版本所有 rc 之后。/ A stable release sorts after its release candidates.
+#define PICO_VERSION_STABLE 65536
+
 // 只接收正式版本号，拒绝截断、溢出和未知后缀。/ Accept bounded release versions without truncation or unknown suffixes.
-static bool version_parts(const char *s, unsigned parts[4]) {
+// 形态：X.Y.Z（正式版）、X.Y.Z-rcN、X.Y.Z-rcN.M（rc 的小修订，如 rc98.1；
+// 排序 rc98 < rc98.1 < rc99 < 正式版）。/ Forms: X.Y.Z (stable), X.Y.Z-rcN,
+// X.Y.Z-rcN.M (rc sub-revision such as rc98.1; ordering rc98 < rc98.1 < rc99 < stable).
+static bool version_parts(const char *s, unsigned parts[PICO_VERSION_PARTS]) {
     if (!s || !*s || strlen(s) > 32) return false;
-    memset(parts, 0, 4 * sizeof(*parts));
+    memset(parts, 0, PICO_VERSION_PARTS * sizeof(*parts));
     for (unsigned i = 0; i < 3; ++i) {
         if (!isdigit((unsigned char)*s)) return false;
         char *end; unsigned long n = strtoul(s, &end, 10);
@@ -21,21 +30,30 @@ static bool version_parts(const char *s, unsigned parts[4]) {
         parts[i] = (unsigned)n; s = end;
         if (i < 2 && *s++ != '.') return false;
     }
-    // 正式版排在该版本所有 rc 之后。/ A stable release sorts after its release candidates.
-    parts[3] = 65536;
+    parts[3] = PICO_VERSION_STABLE;
     if (!*s) return true;
     if (strncmp(s, "-rc", 3)) return false;
     s += 3;
     if (!isdigit((unsigned char)*s)) return false;
     char *end; unsigned long n = strtoul(s, &end, 10);
-    if (*end || n > 65535) return false;
+    if (n > 65535) return false;
     parts[3] = (unsigned)n;
+    s = end;
+    // 可选小修订：rc98 记为 .0，因此 rc98.1 严格新于 rc98、严格旧于 rc99。
+    // Optional sub-revision: rc98 records .0, so rc98.1 is strictly newer than
+    // rc98 and strictly older than rc99.
+    if (!*s) return true;
+    if (*s++ != '.') return false;
+    if (!isdigit((unsigned char)*s)) return false;
+    n = strtoul(s, &end, 10);
+    if (*end || n > 65535) return false;
+    parts[4] = (unsigned)n;
     return true;
 }
 int pico_version_compare(const char *a, const char *b) {
-    unsigned left[4], right[4];
+    unsigned left[PICO_VERSION_PARTS], right[PICO_VERSION_PARTS];
     if (!version_parts(a, left) || !version_parts(b, right)) return 0;
-    for (unsigned i = 0; i < 4; ++i) {
+    for (unsigned i = 0; i < PICO_VERSION_PARTS; ++i) {
         if (left[i] < right[i]) return -1;
         if (left[i] > right[i]) return 1;
     }
@@ -81,7 +99,7 @@ esp_err_t pico_release_parse(const char *json, size_t length, pico_release_t *re
     if (!end || end != json + length) valid = false;
     const cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema");
     const cJSON *size = cJSON_GetObjectItemCaseSensitive(root, "size");
-    unsigned version[4], base[4];
+    unsigned version[PICO_VERSION_PARTS], base[PICO_VERSION_PARTS];
     valid = valid && cJSON_IsNumber(schema) && schema->valuedouble == 1 &&
         field(root, "version", release->version, sizeof(release->version)) &&
         field(root, "project", release->project, sizeof(release->project)) &&

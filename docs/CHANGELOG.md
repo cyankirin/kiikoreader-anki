@@ -8,6 +8,20 @@
 - 历史固定下载不覆盖。Metalio 源码保持私有，公开交付编译固件与安装工具。
 
 
+## 0.3.3-rc100.01 / 2026-10-25
+
+- 同步 rc100 全部变更：小纸 Pico 与 Metalio EINK 4 Plus 分别构建，官网按机型提供刷机、TF 下载及联网 OTA；Pico 漫画图片头测尺寸、时钟样式预览缓存、透明书封缓存及锁屏恢复优化；联网升级优先 GitHub Pages 并启用 SDK 交叉签名证书验证，保留严格 HTTPS、整包校验与回退；历史固定下载不覆盖。
+  Sync all rc100 changes: separate Pico and Metalio EINK 4 Plus builds with per-device flashing, TF download and online OTA on the website; comic image pre-measurement, clock style preview cache, transparent cover cache and lock-screen resume optimisations; GitHub-Pages-first updates with cross-signed certificate verification, keeping strict HTTPS, full-image checks and rollback; historical fixed downloads stay untouched.
+- Anki 修复 TF 双根存储的损坏文件遮蔽：列表仅在文件头校验通过后才把卡组 id 记入去重表，载入时活动根文件损坏会继续尝试另一个根，截断/损坏的 .akd 不再挡住另一个根里同 id 的完好副本。
+  Fix corrupted-file shadowing in the Anki TF dual-root store: the list only records a deck id after its header check passes, and loading falls through to the other root when the active root's file is damaged, so a truncated/corrupt .akd no longer hides a healthy copy of the same deck id on the other root.
+- Anki 卡组列表隐藏 0 卡空卡组：空 Default 等无卡片卡组不再出现在列表里，避免误选；存储层语义不变。
+  Hide 0-card decks in the Anki deck list: empty decks such as a bare Default no longer show up to be picked by mistake; store-layer semantics are unchanged.
+- Anki 超长卡片行上限从 220 提到 400：超长正文不再被静默截断，会话缓冲区随 PSRAM 分配，增量约 6.4KB。
+  Raise the Anki long-card line cap from 220 to 400: overlong text is no longer silently truncated; the session buffer lives in PSRAM, adding roughly 6.4KB.
+- 构建产物额外输出带版本号的 `Read_Pico-<版本>.bin`（如 `Read_Pico-0.3.3-rc100.01.bin`），便于发布与 OTA 核对；原 `Read_Pico.bin` 保持不变。
+  The build now also stages a versioned image `Read_Pico-<version>.bin` (e.g. `Read_Pico-0.3.3-rc100.01.bin`) for release/OTA checks; the original `Read_Pico.bin` stays unchanged.
+
+
 ## 官网双设备入口 · 2026-10-24
 
 - 刷机页先选择小纸 Pico 或 Metalio EINK 4 Plus，再选择对应版本；各自下载、文件名、更新说明及校验独立。
@@ -20,6 +34,40 @@ User-visible changes by release; see [README](../README.md) for usage.
 
 ## 待发布 / Unreleased
 
+（暂无 / None yet）
+
+
+## 0.3.3-rc99.04 / 2026-10-23
+
+- 套用瘦身 sdkconfig 释放应用分区空间：日志默认级别与编译上限降到 ERROR（WARN 及以下全部编出，rc99 基线本已降到 WARN 并关闭 ESP_ERR_TO_NAME_LOOKUP 查找表，本轮再收一级），应用分区余量从 rc99.03 的 6.0KB 回升到 34.6KB；行为仅少控制台警告及以下日志与错误码名字符串，刷机验证时如需警告日志可把日志级别调回 WARN。
+  Apply the slimming sdkconfig to free app-partition space: the default log level and compile-time cap drop to ERROR (WARN and below compile out; the rc99 baseline had already dropped to WARN with the ESP_ERR_TO_NAME_LOOKUP table disabled, and this round tightens one more notch), lifting the app-partition margin from 6.0KB on rc99.03 to 34.6KB; the only behaviour change is fewer console warning-and-below logs and no error-code name strings — set the log level back to WARN when you need warnings during flashing validation. The trim (plus the matching partition-table path fix) is recorded in sdkconfig.defaults so a clean build reproduces this margin.
+  日志：日志级别裁剪（及配套的分区表路径修正）已记录于 sdkconfig.defaults，干净构建可复现该余量。
+- Anki 卡组支持从 TF 卡加载/存储：TF 卡在位且可写时导入落到 /sdcard/anki，否则仍写内部闪存 /flash/anki；载入先试活动根、找不到再试另一个根，列表按卡组 id 去重（活动根优先），删除同时清理两个根避免拔卡后幽灵卡组；学习会话在内存里继续进行，导入中途拔卡会明确提示「TF 卡已拔出」。
+  Anki decks now load and store from the TF card: with the card present and writable imports land on /sdcard/anki, otherwise they still go to internal flash /flash/anki; loading tries the active root first then the other, the list dedupes by deck id (active root first), and deletion clears both roots so a pulled card cannot leave ghost decks; study sessions continue in memory, and pulling the card mid-import reports "TF card removed".
+- PSRAM 不足时按需暂停首页组件：可用 PSRAM 低于 512KB 时跳过首页时钟/日历组件绘制并释放可重建的表盘底图，组件区显示「内存紧张，首页组件已暂停」，余量恢复后下一帧自动恢复；「继续阅读」卡与闭环目标区不受影响。
+  Home widgets pause on demand when PSRAM runs low: below 512KB of free PSRAM the clock/calendar widgets are skipped and the rebuildable clock base is released, the widget area shows "Paused: low memory", and they return automatically once the margin recovers; the resume card and closed-loop goal areas are unaffected.
+
+
+## 0.3.3-rc99.03 / 2026-10-23
+
+- Anki 单选/多选卡片背面自动强调正确答案：自动识别「选项字段为连续单字母（A、B、C、D…，至少两个）且另有字段的值是这些选项字母的子集（如 "AC"）」的选择题模型，背面按题干、选项、答案、备注逐行纯文本排版，正确选项与答案行以反色（黑底白字）绘制，墨水屏上清晰醒目；正面渲染与普通卡片行为不变，背面模板里那段只在高亮正确选项的 JavaScript 不再依赖设备执行。
+  The Anki back side now emphasises correct answers on single/multiple-choice cards: choice models are detected automatically when option fields are consecutive single letters (A, B, C, D, …, at least two) and another field's value is a subset of those option letters (e.g. "AC"); the back lays out question, options, answer and note as plain-text lines, drawing correct options and the answer line inverted (white on black) for clarity on e-paper. Front rendering and ordinary cards behave as before, and the back template's answer-highlighting JavaScript no longer needs to run on device.
+
+
+## 0.3.3-rc99.02 / 2026-10-22
+
+- Anki 学习页字体统一跟随「设置」指定的系统字体：学习视图不再切换到阅读字体（此前与设置不一致且缺字），所有视图与系统界面同字体；阅读字体仅用于书页正文。
+  The Anki study view now follows the system font chosen in Settings: the study view no longer switches to the reading face (previously mismatching Settings and dropping glyphs), all views share the system face; the reading face stays book-body only.
+- 卡片折行按绘制同口径测量并修两处溢出隐患：测量与行距改用 ui_text() 实际使用的有效字号，量窄画宽导致的超屏不再出现；截断点对齐 UTF-8 字符边界，不再切断多字节字符；超长无空格串也能在宽度内被切短。
+  Card wrapping now measures at the draw-time metric and fixes two overflow hazards: measurement and line pitch use the effective size ui_text() actually draws with, so lines no longer measure narrow and draw wide off-screen; cuts align to UTF-8 boundaries instead of splitting multi-byte characters; very long no-space runs also wrap within the width.
+
+
+## 0.3.3-rc99.01 / 2026-10-22
+
+- 基于 rc99 移植完整 Anki 功能：新增 Anki 卡组学习页，导入 TF 卡上的 .apkg（或裸 collection.anki2/anki21），在设备上翻面学习并记录复习进度；解析、渲染与调度有宿主测试覆盖。导入与学习均为文本卡片，图片与音频显示占位。
+  Port the full Anki feature onto rc99: an Anki study page imports .apkg (or a bare collection.anki2/anki21) from the TF card, flips through cards on device and records review progress; parsing, rendering and scheduling are covered by host tests. Text cards only; images and audio show placeholders.
+- 文件页可直接点开 .apkg：自动切到 Anki 页并导入该文件；Anki 页本身仍在右下角「功能」菜单第 6 项。完形（cloze）卡片按 Anki 语义修正：正面挖空当前序号、背面揭示答案，其余序号保留原文。
+  The file page now opens .apkg directly, switching to the Anki page and importing it; the page itself also sits in the bottom-right function menu. Cloze cards follow Anki semantics: the active index is blanked on the front and revealed on the back while others keep their text.
 - 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
   Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
 - 修复章节文件名含冒号的 EPUB 打不开：只有路径首段的冒号仍按协议/盘符分隔处理，条目名内部的冒号按普通字符解析。
@@ -37,6 +85,10 @@ User-visible changes by release; see [README](../README.md) for usage.
   Place double-press unlock below auto sleep on Settings home: off by default for one press, enable it for two. Deep wake shares the choice and PIN validation remains required.
 - 插图缩放校验缓存所属页与布局，兼容解码失败；缩放期间保持媒体与电源处理，支持安全的旋转和局部铺帧。连续 DU 刷新失败时保留待驱动相位以便重试。
   Validate image page/layout ownership and decoding failures during zoom; keep media/power services responsive and clip rotated packed blits safely. Failed continuous-DU draws retain phases for retry.
+- 升级版本比较支持 rc 小修订（如 0.3.3-rc99.01），排序为 rc98 < rc98.1 < rc99 < rc99.01 < 正式版；仍拒绝截断、多级后缀与非数字后缀，旧版号与旧清单行为不变。
+  Update ordering accepts rc sub-revisions (e.g. 0.3.3-rc99.01) with rc98 < rc98.1 < rc99 < rc99.01 < stable; truncation, deeper suffixes and non-numeric suffixes stay rejected, and existing versions/manifests behave as before.
+- 延续 rc99 的功能、分区与数据格式，保留用户配置、原密码记录、阅读进度与已导入的 Anki 卡组。
+  Retain rc99 features, partition/data compatibility, user settings, saved credentials, reading progress and imported Anki decks.
 
 
 ## 0.3.3-rc99 / 2026-10-22
@@ -51,6 +103,21 @@ User-visible changes by release; see [README](../README.md) for usage.
   Clean the preceding screen on reader entry and fuse ordinary body/progress output while retaining calibrated gray transitions and prefetch.
 - 固件优先使用GitHub Pages OTA源，保留官网清单备用与下载校验；官网保留原rc98及更早正式版，继续提供USB全量包与TF完整应用升级包。
   Prefer GitHub Pages OTA with website metadata fallback and verification; retain original rc98/older web choices with USB base and complete TF application packages.
+
+## 0.3.3-rc98.1 / 2026-10-22
+
+- 新增 Anki 卡组学习页：导入 TF 卡上的 .apkg（或裸 collection.anki2/anki21），在设备上翻面学习并记录复习进度；解析、渲染与调度有宿主测试覆盖。导入与学习均为文本卡片，图片与音频显示占位。
+  Added an Anki study page: import .apkg (or a bare collection.anki2/anki21) from the TF card, flip through cards on device and record review progress; parsing, rendering and scheduling are covered by host tests. Text cards only; images and audio show placeholders.
+- 文件页可直接点开 .apkg：自动切到 Anki 页并导入该文件；Anki 页本身仍在右下角「功能」菜单第 6 项。完形（cloze）卡片按 Anki 语义修正：正面挖空当前序号、背面揭示答案，其余序号保留原文。
+  The file page now opens .apkg directly, switching to the Anki page and importing it; the page itself also sits in the bottom-right function menu. Cloze cards follow Anki semantics: the active index is blanked on the front and revealed on the back while others keep their text.
+- 联网OTA优先使用GitHub Pages清单与固件下载，官网清单保留备用；保留断点续传、失败重试、完整校验及空闲分区写入保护。
+  Prefer GitHub Pages OTA metadata/images, retaining website metadata fallback, Range resumes, retries, full verification and inactive-slot protection.
+- 升级版本比较支持 rc 小修订（如 0.3.3-rc98.1），排序为 rc98 < rc98.1 < rc99 < 正式版；仍拒绝截断、多级后缀与非数字后缀，旧版号与旧清单行为不变。
+  Update ordering accepts rc sub-revisions (e.g. 0.3.3-rc98.1) with rc98 < rc98.1 < rc99 < stable; truncation, deeper suffixes and non-numeric suffixes stay rejected, and existing versions/manifests behave as before.
+- 延续 rc98 的功能、分区与数据格式，保留用户配置、原密码记录、阅读进度与已导入的 Anki 卡组。
+  Retain rc98 features, partition/data compatibility, user settings, saved credentials, reading progress and imported Anki decks.
+
+
 
 ## 0.3.3-rc98 / 2026-10-21
 

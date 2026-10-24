@@ -25,6 +25,7 @@ remain in the source. This project is not an official MindReset release.
 | Embedded Noto Sans SC Medium font subset and compressed common-Han bitmaps | SIL OFL-1.1 | [Font license](main/assets/OFL-Noto.txt) |
 | [ESP Web Tools](https://github.com/esphome/esp-web-tools) browser flasher | Apache-2.0 | [Bundled web tool license](flash/vendor/LICENSE) |
 | Espressif TinyUSB component | Apache-2.0 | [Component license](components/espressif__esp_tinyusb/LICENSE) |
+| [miniz](https://github.com/richgel999/miniz) — tinfl inflate subset vendored at `tools/anki_stubs/miniz*` for Anki host tests (the device path uses ROM miniz) | MIT | Upstream copyright notice retained in the vendored sources |
 
 License terms apply to their respective material. The repository's
 [license-scope statement](LICENSE) and new personal-study license do not

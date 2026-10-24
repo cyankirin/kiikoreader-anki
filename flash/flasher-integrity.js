@@ -10,17 +10,15 @@
   const digest=async bytes=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(v=>v.toString(16).padStart(2,'0')).join('');
   function validate(manifest,device='pico'){
     const model=profiles[device];
-    if(!model||!/^\d+\.\d+\.\d+(?:-rc\d+)?$/.test(manifest.version)||manifest.new_install_prompt_erase!==true||manifest.builds?.length!==1||manifest.builds[0].chipFamily!==model.family||manifest.builds[0].parts?.length!==4)throw Error('刷机清单与所选设备不符，已停止安装。');
+    // 版本号接受 rc 小修订（如 0.3.3-rc100.01），由 Anki 线带入：rc100 原正则只认 -rcN，
+    // 会拒绝我们带小修订的版本。/ Version accepts rc sub-revisions (e.g. 0.3.3-rc100.01),
+    // carried over from the Anki line: rc100's original regex only knew -rcN and would
+    // reject our sub-revisioned builds.
+    if(!model||!/^\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?$/.test(manifest.version)||manifest.new_install_prompt_erase!==true||manifest.builds?.length!==1||manifest.builds[0].chipFamily!==model.family||manifest.builds[0].parts?.length!==4)throw Error('刷机清单与所选设备不符，已停止安装。');
     const seen=new Set();
     for(const part of manifest.builds[0].parts){const index=model.offsets.indexOf(part.offset);if(index<0||seen.has(index))throw Error('刷机地址不属于所选设备。');seen.add(index);}
     if(device==='metalio'&&(manifest.board!=='metalio47'||manifest.project!==model.project||manifest.pico_ota?.layout!=='metalio-s31-dual-5m-v1'))throw Error('Metalio 分区或项目身份不匹配。');
     return model;
-  }
-  function appVersion(bytes,model){
-    const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);
-    if(bytes.length<288||bytes[0]!==0xe9||view.getUint16(12,true)!==model.chip||view.getUint32(32,true)!==0xabcd5432)throw Error('下载文件的芯片身份不匹配。');
-    const field=offset=>{const raw=bytes.slice(offset,offset+32);if(!raw.includes(0))throw Error('固件标识损坏。');return new TextDecoder().decode(raw).split('\0')[0];};
-    if(field(80)!==model.project)throw Error('固件项目与所选设备不同，已停止安装。');return field(48);
   }
   async function prepare(manifest,manifestURL,archiveFiles,device='pico'){
     const model=validate(manifest,device), snapshot=JSON.parse(JSON.stringify(manifest));

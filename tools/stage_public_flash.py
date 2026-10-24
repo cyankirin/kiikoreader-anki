@@ -57,7 +57,7 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     # 保留已发布版本的固定下载地址，避免旧清单缓存或正在进行的更新突然遇到 404。
     # Keep immutable published URLs so cached manifests and in-flight updates do not suddenly get a 404.
     for upgrade in FLASH.glob("Pico-update-*.bin"):
-        name = re.fullmatch(r"Pico-update-(\d+\.\d+\.\d+(?:-rc\d+)?)\.bin", upgrade.name)
+        name = re.fullmatch(r"Pico-update-(\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?)\.bin", upgrade.name)
         if not name: continue
         with upgrade.open("rb") as source:
             header = source.read(112)

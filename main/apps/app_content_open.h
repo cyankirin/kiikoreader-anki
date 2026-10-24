@@ -17,6 +17,8 @@ bool app_book_request_resume(const char *path, bool fullscreen);
 /// 仅导出已打开阅读上下文。/ Export only an already open reader context.
 bool app_book_resume_context(char *path, size_t capacity, bool *fullscreen);
 bool app_image_request_open(const char *path);
+/// 文件页点开 .apkg：切到 Anki 页并导入该文件。/ File page opens an .apkg: switch to the Anki page and import it.
+bool app_anki_request_open(const char *path);
 void app_files_request_folder(int folder);
 void app_book_request_manage(void);
 bool app_book_reader_body_visible(void);
