@@ -58,10 +58,11 @@ template script:
   blank line and one `<letter>. <text>` line per option. Letters that only
   lived in `id` attributes and hidden items such as `<li class="hidden">`
   never reach the text.
-- **背面 / Back**：同正面，再加空行、错项反色（正确项保持常规黑字）、
+- **背面 / Back**：同正面，再加空行、错项反色（正确项保持常规黑字；折行时整段反色）、
   `答案：X` 与 `备注：`（注释字段非空时）。
   The same plus a blank line, inverted wrong options (correct ones keep
-  ordinary black ink), `答案：X` and `备注：` when the note field is set.
+  ordinary black ink; a wrapped option stays inverted on every line),
+  `答案：X` and `备注：` when the note field is set.
 - 其余卡组继续走模板路径，行为不变。
   Every other deck keeps the template path unchanged.
 

@@ -36,6 +36,14 @@ elif mode == "invert_close":
 elif mode == "no_hang":
     text = text.replace("                hang = ui_text_fixed_width_px(px, prefix);",
                         "                hang = 0; (void)prefix;", 1)
+elif mode == "first_line_only_invert":
+    # 退回「只有首行反色」的旧行为 / revert to "first line only is inverted"
+    text = text.replace("        bool seg_first = true;\n        while (seg_len > 0",
+                        "        bool seg_first = true;\n        int seg_line = 0;\n"
+                        "        while (seg_len > 0", 1)
+    text = text.replace("            L->line_invert[L->line_count] = seg_invert;",
+                        "            L->line_invert[L->line_count] = seg_invert && seg_line == 0;\n"
+                        "            ++seg_line;", 1)
 elif mode == "no_cjk_rules":
     text = text.replace("    const size_t original = cut;", "    const size_t original = cut;\n    (void)original;", 1)
     text = text.replace("            if (cjk_opening(cp)) {", "            if (false && cjk_opening(cp)) {", 1)
@@ -66,6 +74,7 @@ mutate drop_open drop_open || failures=$((failures + 1))
 mutate invert_close invert_close || failures=$((failures + 1))
 mutate no_hang no_hang || failures=$((failures + 1))
 mutate no_cjk_rules no_cjk_rules || failures=$((failures + 1))
+mutate first_line_only_invert first_line_only_invert || failures=$((failures + 1))
 
 if [ "$failures" -ne 0 ]; then
     echo "anki_layout_probe mutations: FAIL ($failures mutation(s) survived)"

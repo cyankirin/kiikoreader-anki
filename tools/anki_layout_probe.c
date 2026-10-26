@@ -493,6 +493,47 @@ static void case_adaptive_size(void) {
     CHECK(g_layout.text_px == ANKI_MIN_BODY_PX);
 }
 
+// 反色标记随折行传播：整段（首行 + 全部续行）都反色，且不泄漏到下一段。
+// The emphasis marker follows the wrap: the whole segment (first line and
+// every continuation) is inverted, and it never leaks into the next segment.
+static void case_emphasis_wrap(void) {
+    printf("== case: emphasis across wrapped lines ==\n");
+    // 1) 反色长选项：折成多行，每一行都要反色。
+    // A marked long option wrapping over several lines: every line inverted.
+    layout("\x01"
+           "B. 在国家或地方民政部门注册的业余无线电协会，这一行足够长，必然折成三行以上才放得下。",
+           false);
+    check_lines("emphasis-wrapped");
+    printf("   lines=%d\n", g_layout.line_count);
+    CHECK(g_layout.line_count >= 3);
+    for (int i = 0; i < g_layout.line_count; ++i) CHECK(g_layout.line_invert[i]);
+
+    // 2) 无反色标记的长段：每一行都不反色（防止改反）。
+    // A long segment with no marker: no line is inverted (guards a reversed fix).
+    layout("我国依法负责对业余无线电台实施监督管理的机构是国家无线电管理机构和省、自治区、"
+           "直辖市无线电管理机构，这一行同样足够长，必然折行显示。",
+           false);
+    check_lines("plain-wrapped");
+    CHECK(g_layout.line_count >= 3);
+    for (int i = 0; i < g_layout.line_count; ++i) CHECK(!g_layout.line_invert[i]);
+
+    // 3) 反色段后面紧跟普通段：前者全行反色，后者不反色（段落隔离）。
+    // A marked segment followed by a plain one: the former is inverted on every
+    // line, the latter on none (the marker stays inside its segment).
+    layout("\x01"
+           "B. 在国家或地方民政部门注册的业余无线电协会，这一行足够长，必然折成三行以上才放得下。\n"
+           "答案：B\n",
+           false);
+    check_lines("emphasis-then-plain");
+    const int last = g_layout.line_count - 1;
+    CHECK(last >= 3);
+    for (int i = 0; i < last; ++i) CHECK(g_layout.line_invert[i]);
+    CHECK(!g_layout.line_invert[last]);
+    char tail[ANKI_LINE_BUF];
+    line_text(last, tail, sizeof(tail));
+    CHECK(strcmp(tail, "答案：B") == 0);
+}
+
 int main(void) {
     printf("== anki layout probe ==\n");
     check_classifiers();
@@ -504,6 +545,7 @@ int main(void) {
     case_long_token();
     case_option_hanging();
     case_choice_back();
+    case_emphasis_wrap();
     case_fill();
     case_adaptive_size();
     if (failures) {

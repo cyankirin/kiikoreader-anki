@@ -321,19 +321,27 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
                 if (hang > 255) hang = 255;
             }
         }
+        // 段首 \x01 为强调标记：**整段**都要反色绘制，不是只第一行。标记在这里
+        // 一次性吃掉（不占显示宽度），循环内每一行都继承它，折行后仍然整段反色。
+        // A leading \x01 marks the **whole segment** as inverted, not just its
+        // first line. The marker is consumed here once (it takes no display
+        // width) and every line of the segment inherits it, so a wrapped
+        // marked option stays inverted on all of its lines.
+        bool seg_invert = false;
+        if (seg_len > 0 && text[start] == '\x01') {
+            seg_invert = true;
+            ++start;
+            --seg_len;
+        }
+        if (seg_len == 0) {
+            // 段仅剩标记：无内容可显示，按原样跳过（不产生空行）。
+            // Marker-only segment: nothing to show, skipped without adding a
+            // blank line.
+            i = end + 1;
+            continue;
+        }
         bool seg_first = true;
         while (seg_len > 0 && L->line_count < ANKI_LINE_MAX) {
-            // 行首 \x01 为强调标记：该行反色绘制；跳过该字节再开始本行
-            // 内容，标记不占显示宽度。/ A leading \x01 is the emphasis
-            // marker: the line draws inverted; skip the byte before the line
-            // content starts, the marker takes no display width.
-            bool invert = false;
-            if (seg_first && text[start] == '\x01') {
-                invert = true;
-                ++start;
-                --seg_len;
-            }
-            if (seg_len == 0) break;  // 段仅剩标记：无内容可显示 / marker-only segment
             // 首行顶格，续行悬挂在前缀宽度下，可用宽度相应变窄。
             // The first line sits at the margin; continuations hang under the
             // prefix, so their usable width shrinks accordingly.
@@ -385,7 +393,7 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
             cut = cjk_fix_break(text + start, cut, seg_len, px, avail, probe, sizeof(probe));
             L->line_off[L->line_count] = start;
             L->line_len[L->line_count] = cut;
-            L->line_invert[L->line_count] = invert;
+            L->line_invert[L->line_count] = seg_invert;
             L->line_height[L->line_count] = (uint16_t)pitch;
             L->line_x[L->line_count] = (uint8_t)indent;
             ++L->line_count;
