@@ -24,10 +24,12 @@
 
 ## 0.3.3-rc100.02 / 2026-10-26
 
+- Anki 选择题正面改用与背面同构的专用版面：选项带 A/B/C/D 字母、题型（单选/多选）以【】标在题干前、模板里只写在 `id` 属性上的字母与 `<li class="hidden">placeholder</li>` 这类隐藏条目不再泄漏到正文；背面题干行同样带上题型前缀。
+  The Anki choice-card front now uses the same dedicated layout as the back: options carry A/B/C/D letters, the question type (单选/多选) is prefixed in brackets, and letters that only lived in `id` attributes or hidden items such as `<li class="hidden">placeholder</li>` no longer leak into the text; the back's question line carries the type prefix as well.
 - Anki 选择题背面的强调方案互换：墨水屏上反色白字看不清，现在**正确选项恢复常规黑字**、**错误选项才反色**，「答案：X」行同样保持常规可读；正面与普通卡片行为不变。
   The Anki choice back swaps which options stand out: inverted white on e-paper is hard to read, so **correct options return to ordinary black ink**, **only the wrong options are inverted**, and the "答案：X" answer statement stays readable as well; the front and ordinary cards are unchanged.
-- Anki 学习页按字号与墨水屏分辨率重做排版：行距按字体的真实行盒（上延伸 + 下延伸）度量，保证相邻两行的墨迹不重叠；每行按「能放就放」排满，不再逐行留白；题干与选项、选项与答案之间用空行分层；选项换行时续行悬挂缩进到 `<字母>. ` 前缀宽度；中文断行遵守避头尾（闭符号不落行首、开符号不落行尾）；正文过长时字号按 2px 步进自动缩小（下限 16px）以控制在三页内。
-  The Anki study page reworks its typography for the font size and the e-paper resolution: the line pitch now comes from the font's real line box (ascent + descent) so neighbouring lines can never overlap; each line is filled to what actually fits instead of leaving a gap on every line; blank lines layer the question, the options and the answer; an option's continuation lines hang under the width of its `<letter>. ` prefix; Chinese line breaking follows the head and tail rules (a closing mark never starts a line, an opening mark never ends one); and an overlong body shrinks its type in 2px steps (down to a 16px floor) to stay within three pages.
+- Anki 学习页按字号与墨水屏分辨率重做排版：行距按字体的真实行盒（上延伸 + 下延伸）度量、并以正文实测墨迹兜底，保证相邻两行的墨迹不重叠（中文不再压字）；每行按「能放就放」排满，不再逐行留白；题干与选项、选项与答案之间用空行分层；选项换行时续行悬挂缩进到 `<字母>. ` 前缀宽度；中文断行遵守避头尾（闭符号不落行首、开符号不落行尾）；正文过长时字号按 2px 步进自动缩小（下限 16px）以控制在三页内。
+  The Anki study page reworks its typography for the font size and the e-paper resolution: the line pitch now comes from the font's real line box (ascent + descent) with the measured ink of the text as a floor, so neighbouring lines can never overlap and Chinese text no longer collides; each line is filled to what actually fits instead of leaving a gap on every line; blank lines layer the question, the options and the answer; an option's continuation lines hang under the width of its `<letter>. ` prefix; Chinese line breaking follows the head and tail rules (a closing mark never starts a line, an opening mark never ends one); and an overlong body shrinks its type in 2px steps (down to a 16px floor) to stay within three pages.
 
 
 ## 官网双设备入口 · 2026-10-24

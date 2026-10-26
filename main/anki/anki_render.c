@@ -1,12 +1,15 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：模板渲染实现。有界输出构建器 + 字段查找 + 条件段 + cloze 处理，
- *       最后复用 html_to_blocks 得到块文本；选择题模型另走专用背面版面
- *       （按字段拼装，错误选项加 \x01 强调标记，答案行保持常规可读）。
+ *       最后复用 html_to_blocks 得到块文本；选择题模型另走专用版面
+ *       （正面：元信息 / 【题型】题干 / 选项带字母；背面再加错项 \x01、
+ *       答案与备注），模板里只写在属性上的字母与隐藏占位条目不进正文。
  * English: Template rendering. Bounded output builder, field lookup,
  *          conditional sections and cloze handling, then html_to_blocks for
- *          block text; choice models take a dedicated back layout (assembled
- *          from fields, wrong options marked with \x01, the answer line left
- *          in ordinary readable ink).
+ *          block text; choice models take dedicated layouts (front: meta line,
+ *          【type】question, lettered options; back: the same plus \x01 on
+ *          wrong options, the answer and the note), and letters that only
+ *          lived in template attributes or hidden placeholders never reach the
+ *          text.
  */
 #include "anki_render.h"
 
@@ -481,6 +484,141 @@ static void put_field_text(builder_t* b, char* buf, const char* value, size_t le
     put_trunc(b, buf, strlen(buf));
 }
 
+/// 选择题题型字段：约定名为 "W"（业余无线电新版的模型），值为「单选」/「多选」。
+/// 找不到时返回 -1，正面背面都不加【】前缀。
+/// The choice type field: conventionally named "W" (the amateur-radio model)
+/// with values 单选 / 多选. Returns -1 when absent; neither side then carries
+/// a bracket prefix.
+static int choice_type_field(const anki_notetype_t* nt, const choice_layout_t* layout) {
+    for (int i = 0; i < nt->field_count; ++i) {
+        if (choice_is_option(layout, i) || i == layout->answer_field) continue;
+        if (strcasecmp(nt->fields[i], "W") == 0) return i;
+    }
+    return -1;
+}
+
+/// 追加「【题型】」前缀：题型字段为空或清洗失败时不加，题型只取第一行并限长。
+/// Append the "【type】" prefix; skipped when the field is empty or cannot be
+/// cleaned. Only the first line is used and its length is capped.
+static void put_type_prefix(builder_t* b, const render_ctx_t* rc, int type_field, char* buf) {
+    if (type_field < 0) return;
+    size_t len = 0;
+    const char* value = ctx_field(rc, type_field, &len);
+    if (!value || len == 0) return;
+    if (html_to_text(value, len, buf, FIELD_VALUE_MAX) != ESP_OK) return;
+    size_t n = 0;
+    while (buf[n] && buf[n] != '\n') ++n;
+    size_t start = 0;
+    while (start < n && (buf[start] == ' ' || buf[start] == '\t')) ++start;
+    while (n > start && (buf[n - 1] == ' ' || buf[n - 1] == '\t')) --n;
+    // 限长后退回字符边界，不切断多字节字符。
+    // Cap the length and back off to a character boundary.
+    if (n - start > 12) {
+        n = start + 12;
+        while (n > start && ((unsigned char)buf[n] & 0xC0) == 0x80) --n;
+    }
+    if (n == start) return;
+    put_trunc(b, "【", strlen("【"));
+    put_trunc(b, buf + start, n - start);
+    put_trunc(b, "】", strlen("】"));
+}
+
+/// 追加题干之外的元信息行：模板里是 `<small>{{I}} / {{J}} / {{P}}</small>`
+/// （题号、来源与章节号）。按这三个字段名取，空字段跳过，三个都空时不加这一行；
+/// 其余字段（如 X/Y/Z 那类 TRUE/FALSE 标记）不进版面。
+/// Append the meta line: the template spelled it
+/// `<small>{{I}} / {{J}} / {{P}}</small>` (card id, source, section). The three
+/// names are looked up directly, empty ones are skipped, and the line vanishes
+/// when all three are empty; other fields (the TRUE/FALSE flags and the like)
+/// stay out of the layout.
+static void put_meta_line(builder_t* b, const render_ctx_t* rc, char* buf) {
+    static const char* const k_meta_fields[] = {"I", "J", "P"};
+    bool first = true;
+    for (size_t f = 0; f < sizeof(k_meta_fields) / sizeof(k_meta_fields[0]); ++f) {
+        size_t len = 0;
+        const char* value =
+            field_value(rc, k_meta_fields[f], strlen(k_meta_fields[f]), &len);
+        if (!value || len == 0) continue;
+        if (html_to_text(value, len, buf, FIELD_VALUE_MAX) != ESP_OK) continue;
+        size_t n = strlen(buf);
+        while (n && (buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\t')) buf[--n] = 0;
+        size_t start = 0;
+        while (buf[start] == ' ' || buf[start] == '\t') ++start;
+        if (!buf[start]) continue;
+        // 单个字段限长，同样退回字符边界。
+        // Cap one field, again on a character boundary.
+        if (n - start > 40) {
+            n = start + 40;
+            while (n > start && ((unsigned char)buf[n] & 0xC0) == 0x80) --n;
+            buf[n] = 0;
+        }
+        for (char* p = buf + start; *p; ++p) {
+            if (*p == '\n') *p = ' ';
+        }
+        if (!first) put_trunc(b, " / ", 3);
+        put_trunc(b, buf + start, n - start);
+        first = false;
+    }
+    if (!first) put_trunc(b, "\n", 1);
+}
+
+/// 选择题正面：与背面同构但不显示答案——元信息行（模板里有题号/来源字段时）、
+/// 第 1 行 `【题型】<题干>`、空行、每个选项一行 `<字母>. <选项纯文本>`。
+/// 模板里的隐藏占位条目（如 `<li class="hidden">placeholder</li>`）与脚本都不进
+/// 正文；正面不产生 \x01。
+/// Choice front: the back's shape without the answer — the meta line (when the
+/// template carries card-id or source fields), `【type】<question>` as the first
+/// line, a blank line, then one `<letter>. <option text>` line per option.
+/// Hidden placeholder items (`<li class="hidden">placeholder</li>`) and scripts
+/// never reach the text, and the front never emits \x01.
+static esp_err_t render_choice_front(const anki_collection_t* col, const anki_card_t* card,
+                                     const choice_layout_t* layout, char* out, size_t cap) {
+    const anki_note_t* note = view_note(col, card->nid);
+    if (!note) return ESP_ERR_NOT_FOUND;
+    const anki_notetype_t* nt = view_notetype(col, note->mid);
+    if (!nt) return ESP_ERR_NOT_FOUND;
+
+    render_ctx_t rc = {0};
+    rc.nt = nt;
+    split_fields(&rc, note->flds, strlen(note->flds), NULL, nt->field_count);
+
+    // 字段 HTML→文本的临时缓冲走堆：内部 RAM 静态区已近满，不给 BSS 添 16KB。
+    // The field HTML-to-text scratch buffer is heap-allocated: internal RAM
+    // is nearly full of statics, so BSS must not grow by 16KB.
+    char* buf = malloc(FIELD_VALUE_MAX);
+    if (!buf) return ESP_ERR_NO_MEM;
+
+    builder_t b = {.out = out, .len = 0, .cap = cap, .overflow = false};
+    const int type_field = choice_type_field(nt, layout);
+
+    // 元信息行：模板把它放在最前面，这里同样。/ The meta line comes first, as in the template.
+    put_meta_line(&b, &rc, buf);
+
+    // 第 1 行：【题型】题干。/ First line: 【type】question.
+    size_t q_len = 0;
+    const char* question = ctx_field(&rc, layout->question_field, &q_len);
+    put_type_prefix(&b, &rc, type_field, buf);
+    put_field_text(&b, buf, question, q_len);
+    put_trunc(&b, "\n\n", 2);
+
+    // 选项行：字母来自字段顺序，模板里的 id 属性本来就不出文本。
+    // Option lines: the letter comes from the field order; the template only
+    // ever put it in an id attribute, which is why the front had no letters.
+    for (int i = 0; i < layout->option_count; ++i) {
+        size_t opt_len = 0;
+        const char* opt = ctx_field(&rc, layout->option_field[i], &opt_len);
+        if (!opt) continue;
+        char head[3] = {layout->option_letter[i], '.', ' '};
+        put_trunc(&b, head, sizeof(head));
+        put_field_text(&b, buf, opt, opt_len);
+        put_trunc(&b, "\n", 1);
+    }
+
+    out[b.len] = 0;
+    free(buf);
+    return ESP_OK;
+}
+
 /// 选择题背面：不走通用 HTML 模板路径，直接按字段拼装纯文本（行 = '\n'
 /// 分隔）：第 1 行题干；空行分层；每个选项一行 `<字母>. <选项纯文本>`，
 /// 错误选项行首加强调标记 \x01（正确项保持常规黑字，答案陈述也常规）；
@@ -512,6 +650,7 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     if (!buf) return ESP_ERR_NO_MEM;
 
     builder_t b = {.out = out, .len = 0, .cap = cap, .overflow = false};
+    const int type_field = choice_type_field(nt, layout);
 
     // 答案原文：判定正确选项按 trim+大写逐个字母比对，答案行显示原值。
     // The raw answer: the correct-option test compares letters trimmed and
@@ -519,10 +658,12 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     size_t answer_len = 0;
     const char* answer = ctx_field(&rc, layout->answer_field, &answer_len);
 
-    // 第 1 行：题干（复用现有 HTML→文本清洗）。
-    // First line: the question, reusing the existing HTML-to-text cleaning.
+    // 第 1 行：【题型】题干（与正面一致，两侧都能看到单选/多选），复用现有
+    // HTML→文本清洗。/ First line: 【type】question, matching the front so both
+    // sides show 单选/多选, reusing the existing HTML-to-text cleaning.
     size_t q_len = 0;
     const char* question = ctx_field(&rc, layout->question_field, &q_len);
+    put_type_prefix(&b, &rc, type_field, buf);
     put_field_text(&b, buf, question, q_len);
     // 题干与选项之间留一空行：同字号下靠间距分层，不靠更小的字号。
     // A blank line separates the question from the options: the hierarchy
@@ -624,6 +765,16 @@ void anki_collection_from_import(const anki_import_t* imp, anki_collection_t* ou
 esp_err_t anki_render_front(const anki_collection_t* col, const anki_card_t* card, char* out,
                             size_t cap) {
     if (!col || !card || !out || cap == 0) return ESP_ERR_INVALID_ARG;
+    // 选择题模型走专用正面版面：选项带 A/B/C/D 字母，模板里只写在 id 属性上的
+    // 字母与隐藏占位条目都不会进正文；其余卡组继续走模板路径，行为不变。
+    // Choice models take the dedicated front layout: options carry A/B/C/D
+    // letters, while the template-only id attributes and hidden placeholder
+    // items never reach the text. Every other deck keeps the template path
+    // and its behaviour is unchanged.
+    choice_layout_t layout;
+    if (choice_layout(col, card, &layout)) {
+        return render_choice_front(col, card, &layout, out, cap);
+    }
     return render_card(col, card, false, NULL, out, cap);
 }
 
