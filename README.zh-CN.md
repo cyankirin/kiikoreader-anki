@@ -13,7 +13,7 @@
 本仓库在官方 **rc100** 基础上移植了 Anki 卡组学习功能：导入 `.apkg` 后在设备上按 Anki 调度复习，支持单选/多选题的选项标注、错误项反色、按字号与墨水屏分辨率自适应排版。
 
 - **固件下载**：[`firmware/Read_Pico-0.3.3-rc100.02.bin`](firmware/Read_Pico-0.3.3-rc100.02.bin)（只烧 0x10000 应用分区）
-- **刷机与使用说明**：[docs/anki-flash-guide.md](docs/anki-flash-guide.md)（先线刷官方 rc100 → Flash Download Tool 烧 0x10000 → 恢复出厂设置 → `.apkg` 放 TF 卡 `/anki/`）
+- **刷机与使用说明**：[docs/anki-flash-guide.md](docs/anki-flash-guide.md)（**先备份配置** → 线刷官方 rc100 → Flash Download Tool 烧 0x10000 → 恢复出厂设置 → `.apkg` 放 TF 卡 `/anki/`）
 - **改动明细**：[docs/CHANGELOG.md](docs/CHANGELOG.md) 的 `0.3.3-rc99.01` ~ `0.3.3-rc100.02` 段
 
 
