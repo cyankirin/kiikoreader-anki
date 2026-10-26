@@ -1,11 +1,12 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：模板渲染实现。有界输出构建器 + 字段查找 + 条件段 + cloze 处理，
  *       最后复用 html_to_blocks 得到块文本；选择题模型另走专用背面版面
- *       （按字段拼装，正确选项与答案行加 \x01 强调标记）。
+ *       （按字段拼装，错误选项加 \x01 强调标记，答案行保持常规可读）。
  * English: Template rendering. Bounded output builder, field lookup,
  *          conditional sections and cloze handling, then html_to_blocks for
  *          block text; choice models take a dedicated back layout (assembled
- *          from fields, correct options and the answer line marked with \x01).
+ *          from fields, wrong options marked with \x01, the answer line left
+ *          in ordinary readable ink).
  */
 #include "anki_render.h"
 
@@ -481,15 +482,18 @@ static void put_field_text(builder_t* b, char* buf, const char* value, size_t le
 }
 
 /// 选择题背面：不走通用 HTML 模板路径，直接按字段拼装纯文本（行 = '\n'
-/// 分隔）：第 1 行题干；每个选项一行 `<字母>. <选项纯文本>`，正确选项行首加
-/// 强调标记 \x01；一行 `答案：<T 的原值>`（同样加 \x01）；注释字段非空时
-/// 追加 `备注：<N>`。输出受出参容量约束，超长截断并保证 NUL 结尾。
+/// 分隔）：第 1 行题干；空行分层；每个选项一行 `<字母>. <选项纯文本>`，
+/// 错误选项行首加强调标记 \x01（正确项保持常规黑字，答案陈述也常规）；
+/// 空行分层后是一行 `答案：<T 的原值>`；注释字段非空时追加 `备注：<N>`。
+/// 输出受出参容量约束，超长截断并保证 NUL 结尾。
 /// Choice back: bypass the generic HTML template path and assemble plain
-/// text from fields (lines separated by '\n'): the question first; one line
-/// per option as `<letter>. <option text>`, correct options prefixed with
-/// the \x01 emphasis marker; one line `答案：<raw T>` (also \x01); and
-/// `备注：<N>` when the note field is non-empty. Output respects the
-/// caller's cap: overflow truncates and the result stays NUL-terminated.
+/// text from fields (lines separated by '\n'): the question first; a blank
+/// line for hierarchy; one line per option as `<letter>. <option text>` with
+/// the \x01 emphasis marker on wrong options (correct options keep ordinary
+/// black ink and so does the answer statement); another blank line; one line
+/// `答案：<raw T>`; and `备注：<N>` when the note field is non-empty. Output
+/// respects the caller's cap: overflow truncates and the result stays
+/// NUL-terminated.
 static esp_err_t render_choice_back(const anki_collection_t* col, const anki_card_t* card,
                                     const choice_layout_t* layout, char* out, size_t cap) {
     const anki_note_t* note = view_note(col, card->nid);
@@ -515,15 +519,18 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     size_t answer_len = 0;
     const char* answer = ctx_field(&rc, layout->answer_field, &answer_len);
 
-    // 第 1 行：题干（复用现有 HTML→文本清洗）。/ First line: the question,
-    // reusing the existing HTML-to-text cleaning.
+    // 第 1 行：题干（复用现有 HTML→文本清洗）。
+    // First line: the question, reusing the existing HTML-to-text cleaning.
     size_t q_len = 0;
     const char* question = ctx_field(&rc, layout->question_field, &q_len);
     put_field_text(&b, buf, question, q_len);
-    put_trunc(&b, "\n", 1);
+    // 题干与选项之间留一空行：同字号下靠间距分层，不靠更小的字号。
+    // A blank line separates the question from the options: the hierarchy
+    // comes from spacing, not from a smaller size.
+    put_trunc(&b, "\n\n", 2);
 
-    // 选项行：`<字母>. <选项纯文本>`，正确选项行首加 \x01。
-    // Option lines: `<letter>. <option text>`, correct ones prefixed with \x01.
+    // 选项行：`<字母>. <选项纯文本>`，错误选项行首加 \x01。
+    // Option lines: `<letter>. <option text>`, wrong ones prefixed with \x01.
     for (int i = 0; i < layout->option_count; ++i) {
         size_t opt_len = 0;
         const char* opt = ctx_field(&rc, layout->option_field[i], &opt_len);
@@ -534,15 +541,22 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
                 correct = true;
             }
         }
-        if (correct) put_trunc(&b, "\x01", 1);
+        // 强调标记落在错误选项上：正确项与答案陈述保持常规黑字，墨水屏上
+        // 白字反色看不清，错的才需要被抹掉。
+        // The emphasis marker lands on wrong options: correct ones and the
+        // answer statement keep ordinary black ink, since inverted white on
+        // e-paper is hard to read and only the wrong ones need muting.
+        if (!correct) put_trunc(&b, "\x01", 1);
         char head[3] = {layout->option_letter[i], '.', ' '};
         put_trunc(&b, head, sizeof(head));
         put_field_text(&b, buf, opt, opt_len);
         put_trunc(&b, "\n", 1);
     }
 
-    // 答案行。/ Answer line.
-    put_trunc(&b, "\x01", 1);
+    // 选项与答案之间同样留一空行。/ One blank line separates options from the answer.
+    put_trunc(&b, "\n", 1);
+
+    // 答案行：陈述本身不加强调标记。/ Answer line: the statement carries no marker.
     put_trunc(&b, "答案：", strlen("答案："));
     put_field_text(&b, buf, answer, answer_len);
     put_trunc(&b, "\n", 1);
@@ -616,10 +630,10 @@ esp_err_t anki_render_front(const anki_collection_t* col, const anki_card_t* car
 esp_err_t anki_render_back(const anki_collection_t* col, const anki_card_t* card,
                            const char* front_text, char* out, size_t cap) {
     if (!col || !card || !out || cap == 0) return ESP_ERR_INVALID_ARG;
-    // 选择题模型走专用版面：正确选项与答案行加 \x01 强调标记（正面与此
-    // 无关，anki_render_front 不产生任何 \x01）。/ Choice models take the
-    // dedicated layout: correct options and the answer line carry the \x01
-    // emphasis marker (the front is untouched and never emits \x01).
+    // 选择题模型走专用版面：错误选项行加 \x01 强调标记（正面与此无关，
+    // anki_render_front 不产生任何 \x01）。
+    // Choice models take the dedicated layout: wrong option lines carry the
+    // \x01 emphasis marker (the front is untouched and never emits \x01).
     choice_layout_t layout;
     if (choice_layout(col, card, &layout)) {
         return render_choice_back(col, card, &layout, out, cap);

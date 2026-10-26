@@ -108,6 +108,11 @@ void ui_draw_frosted_pocket(uint8_t *framebuffer, EpdRect rect);
 void ui_text_set_system_scale(bool enabled);
 void ui_text_set_system_font(bool enabled);
 int ui_text_effective_px(int px);
+/// 当前文本走内建字形还是 TTF：与 ui_text()/ui_text_fixed() 的分支完全一致，
+/// 供别处按同一字体上下文度量行高与字宽。/ Whether text draws with the
+/// built-in face or the TTF: the same branch ui_text()/ui_text_fixed() take,
+/// so callers can measure line height and width on the matching font.
+bool ui_text_uses_builtin(const char* text);
 /// 按系统字号绘制单行文字，按字形真实边界适配控件；不打开第二份字体。
 /// Scale one line to the UI preference, fitting native glyphs within a control without loading another face.
 void ui_text_box(uint8_t *fb, EpdRect box, int px, const char *text,

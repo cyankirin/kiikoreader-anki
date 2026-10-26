@@ -22,6 +22,14 @@
   The build now also stages a versioned image `Read_Pico-<version>.bin` (e.g. `Read_Pico-0.3.3-rc100.01.bin`) for release/OTA checks; the original `Read_Pico.bin` stays unchanged.
 
 
+## 0.3.3-rc100.02 / 2026-10-26
+
+- Anki 选择题背面的强调方案互换：墨水屏上反色白字看不清，现在**正确选项恢复常规黑字**、**错误选项才反色**，「答案：X」行同样保持常规可读；正面与普通卡片行为不变。
+  The Anki choice back swaps which options stand out: inverted white on e-paper is hard to read, so **correct options return to ordinary black ink**, **only the wrong options are inverted**, and the "答案：X" answer statement stays readable as well; the front and ordinary cards are unchanged.
+- Anki 学习页按字号与墨水屏分辨率重做排版：行距改用字体真实上下延伸量度量（不再按「字号 + 10」估算）；题干与选项、选项与答案之间用空行分层；选项换行时续行悬挂缩进到 `<字母>. ` 前缀宽度；中文断行遵守避头尾（闭符号不落行首、开符号不落行尾）；正文过长时字号按 2px 步进自动缩小（下限 16px）以控制在三页内。
+  The Anki study page reworks its typography for the font size and the e-paper resolution: the line pitch now comes from the font's real vertical extents instead of a guessed "size + 10"; blank lines layer the question, the options and the answer; an option's continuation lines hang under the width of its `<letter>. ` prefix; Chinese line breaking follows the head and tail rules (a closing mark never starts a line, an opening mark never ends one); and an overlong body shrinks its type in 2px steps (down to a 16px floor) to stay within three pages.
+
+
 ## 官网双设备入口 · 2026-10-24
 
 - 刷机页先选择小纸 Pico 或 Metalio EINK 4 Plus，再选择对应版本；各自下载、文件名、更新说明及校验独立。

@@ -439,10 +439,14 @@ static void test_render(void) {
     anki_apkg_free(&imp);
 }
 
-// 选择题背面强调：正确选项行与答案行带 \x01（反色绘制）标记；正面与普通
-// （非选择题）卡片一律不带。/ Choice-back emphasis: correct option lines and
-// the answer line carry the \x01 (inverted draw) marker; the front and
-// ordinary (non-choice) cards never carry it.
+// 选择题背面强调：错误选项行带 \x01（反色绘制）标记；正确选项与「答案：X」
+// 行不带标记（墨水屏上反色白字看不清，正确项与答案陈述必须保持常规黑字）。
+// 背面结构：题干 → 空行 → 选项 → 空行 → 答案 →（备注）。
+// Choice-back emphasis: wrong option lines carry the \x01 (inverted draw)
+// marker; the correct option and the "答案：X" line do not (inverted white on
+// e-paper is hard to read, so the correct option and the answer statement
+// keep ordinary black ink). The back layout is: question, blank line,
+// options, blank line, answer and the optional note.
 static void test_choice_render(void) {
     printf("== choice render ==\n");
     anki_import_t imp = {0};
@@ -451,42 +455,64 @@ static void test_choice_render(void) {
     anki_collection_from_import(&imp, &col);
     static char front[ANKI_CARD_TEXT_MAX], back[ANKI_CARD_TEXT_MAX];
     if (imp.card_count == 2) {
-        // 单选卡：T="A"，只有 A 行强调。/ Single-choice card: T="A", only A is emphasised.
+        // 单选卡：T="A"，只有错误项 B/C/D 被反色。/ Single-choice card: T="A",
+        // only the wrong options B/C/D are inverted.
         CHECK(anki_render_front(&col, &imp.cards[0], front, sizeof(front)) == ESP_OK);
         CHECK(strstr(front, "\x01") == NULL); // 正面无强调标记 / no marker on the front
         CHECK(anki_render_back(&col, &imp.cards[0], front, back, sizeof(back)) == ESP_OK);
-        // 整篇背面逐行钉死：题干、选项（A 行首带 \x01）、答案行（带 \x01），
-        // 注释为空故无备注行。/ The whole back is pinned line by line:
-        // question, options (the A line leads with \x01) and the answer line
-        // (also \x01); the empty note means no note line.
+        // 整篇背面逐行钉死：题干、空行、选项（错误项行首带 \x01）、空行、
+        // 答案行（不带标记），注释为空故无备注行。
+        // The whole back is pinned line by line: question, blank line,
+        // options (wrong ones lead with \x01), blank line, answer line
+        // (no marker); the empty note means no note line.
         CHECK(strcmp(back,
                      "我国依法负责对业余无线电台实施监督管理的机构是：\n"
-                     "\x01"
+                     "\n"
                      "A. 国家无线电管理机构和省、自治区、直辖市无线电管理机构\n"
-                     "B. 在国家或地方民政部门注册的业余无线电协会\n"
-                     "C. 国家体育管理机构和地方体育管理机构\n"
-                     "D. 国家和地方公安部门\n"
                      "\x01"
+                     "B. 在国家或地方民政部门注册的业余无线电协会\n"
+                     "\x01"
+                     "C. 国家体育管理机构和地方体育管理机构\n"
+                     "\x01"
+                     "D. 国家和地方公安部门\n"
+                     "\n"
                      "答案：A\n") == 0);
-        CHECK(strstr(back, "\n\x01" "A. ") != NULL);     // 正确选项反色 / correct option inverted
-        CHECK(strstr(back, "\n\x01" "答案：A") != NULL);  // 答案行反色 / answer line inverted
-        CHECK(strstr(back, "\nB. ") != NULL);             // 错误选项常规 / wrong options stay plain
-        CHECK(strstr(back, "\n\x01" "B.") == NULL);
-        CHECK(strstr(back, "\n\x01" "C.") == NULL);
-        CHECK(strstr(back, "\n\x01" "D.") == NULL);
+        CHECK(strstr(back, "\nA. ") != NULL);        // 正确项常规 / correct option plain
+        CHECK(strstr(back, "\n\x01" "A. ") == NULL);  // 正确项不反色 / correct option not inverted
+        CHECK(strstr(back, "\n\x01" "B. ") != NULL);  // 错误项反色 / wrong option inverted
+        CHECK(strstr(back, "\n\x01" "C. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "D. ") != NULL);
+        CHECK(strstr(back, "\n答案：A") != NULL);      // 答案行常规 / answer line plain
+        CHECK(strstr(back, "\n\x01" "答案") == NULL);  // 答案行不反色 / answer not inverted
+        CHECK(strstr(back, "：\n\nA. ") != NULL);      // 题干后有空行 / blank line after the question
+        CHECK(strstr(back, "门\n\n答案：A") != NULL);  // 选项后有空行 / blank line after the options
         CHECK(strstr(back, "备注：") == NULL); // 注释为空无备注行 / no note line when N is empty
 
-        // 多选卡：T="AC"，A、C 两行强调。/ Multiple-choice card: T="AC", A and C are emphasised.
+        // 多选卡：T="AC"，A/C 常规，B/D 反色。/ Multiple-choice card: T="AC",
+        // A and C stay plain while B and D are inverted.
         CHECK(anki_render_front(&col, &imp.cards[1], front, sizeof(front)) == ESP_OK);
         CHECK(strstr(front, "\x01") == NULL);
         CHECK(anki_render_back(&col, &imp.cards[1], front, back, sizeof(back)) == ESP_OK);
-        CHECK(strstr(back, "\n\x01" "A. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "C. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "答案：AC") != NULL);
-        CHECK(strstr(back, "\nB. ") != NULL);
-        CHECK(strstr(back, "\nD. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "B.") == NULL);
-        CHECK(strstr(back, "\n\x01" "D.") == NULL);
+        CHECK(strcmp(back,
+                     "我国专门针对无线电管理的行政法规及其制定机构是：\n"
+                     "\n"
+                     "A. 《中华人民共和国无线电管理条例》\n"
+                     "\x01"
+                     "B. 《中华人民共和国无线电管理办法》\n"
+                     "C. 国务院和中央军委\n"
+                     "\x01"
+                     "D. 工业和信息化部\n"
+                     "\n"
+                     "答案：AC\n"
+                     "备注：参见《条例》第一章\n") == 0);
+        CHECK(strstr(back, "\nA. ") != NULL);
+        CHECK(strstr(back, "\nC. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "A. ") == NULL);
+        CHECK(strstr(back, "\n\x01" "C. ") == NULL);
+        CHECK(strstr(back, "\n\x01" "B. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "D. ") != NULL);
+        CHECK(strstr(back, "\n答案：AC") != NULL);
+        CHECK(strstr(back, "\n\x01" "答案") == NULL);
         CHECK(strstr(back, "\n备注：参见《条例》第一章") != NULL); // 注释非空出备注行 / note line when N is set
     }
     anki_apkg_free(&imp);

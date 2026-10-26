@@ -27,6 +27,7 @@
 #include "esp_log.h"
 #include "read_pico_sd.h"
 #include "ttf_font.h"
+#include "ui_font.h"
 #include "ui_gesture.h"
 #include "ui_kit.h"
 #include "ui_menu.h"
@@ -53,6 +54,12 @@
 // measurement never undercounts the real span.
 #define LINE_BUF 512
 #define APKG_DIRS 2
+// 自适应字号：正文超过这个页数就缩小字号，取第一个不超标的字号。
+// Adaptive size: shrink the body type when it runs past this many pages and
+// keep the first size that fits.
+#define ANKI_PAGES_TARGET 3
+// 自适应字号下限：再小就读不清了。/ Adaptive size floor: below this the text stops being readable.
+#define ANKI_MIN_BODY_PX 16
 
 typedef enum {
     ANKI_VIEW_DECKS = 0,
@@ -90,10 +97,20 @@ typedef struct {
     const char* text;      // 当前显示的文本 / text on screen
     size_t line_off[LINE_MAX];
     size_t line_len[LINE_MAX];
-    // 行首 \x01 强调标记（选择题背面正确选项/答案行）：该行反色绘制。
-    // Leading \x01 emphasis marker (choice-back correct options/answer line):
-    // that line is drawn inverted.
+    // 行首 \x01 强调标记（选择题背面错误选项行）：该行反色绘制。
+    // Leading \x01 emphasis marker (choice-back wrong option lines): that
+    // line is drawn inverted.
     bool line_invert[LINE_MAX];
+    // 每行高度（像素）：文本行与空行同为行距，后续图片行为其缩放高度。
+    // Height of each line in pixels: text and blank lines share the pitch, a
+    // later image line carries its scaled height.
+    uint16_t line_height[LINE_MAX];
+    // 行首缩进：0 = 左边距；选项续行缩进到 "<字母>. " 前缀宽度。
+    // Left indent of a line: 0 = the left margin; an option's continuation
+    // lines indent to the "<letter>. " prefix width.
+    uint8_t line_x[LINE_MAX];
+    // 本次排版实际使用的字号（自适应后）。/ The size this layout settled on.
+    int text_px;
     int line_count;
     int line_page;
     int studied;
@@ -261,7 +278,7 @@ static void scan_apkg(void) {
     if (s_page < 0) s_page = 0;
 }
 
-// ---------------------------------------------------------------- 会话
+// ---------------------------------------------------------------- 排版
 
 // 正文排版与绘制同口径：ui_text() 内部会把每个字号过一次
 // ui_text_effective_px()（+2 且按系统字号百分比缩放），折行测量与行距
@@ -273,15 +290,165 @@ static int body_px(void) {
     return ui_text_effective_px(UI_PX_BODY);
 }
 
-static void wrap_card_text(void) {
+// 行距按当前字体的真实上下延伸量算：字形实际占多高，行就占多高。
+// 字体分支与 ui_text_fixed 一致（ui_text_uses_builtin），量出的行高才和
+// 画出来的一致。/ The pitch follows the font's real extents: a line takes
+// exactly what its glyphs need. The font branch matches ui_text_fixed
+// (ui_text_uses_builtin) so the measured pitch is the drawn one.
+static int body_pitch(int px) {
+    int above = 0, below = 0;
+    if (ui_text_uses_builtin("AA")) ui_font_measure_line_px(px, "AA", &above, &below);
+    else ttf_measure_line_px(px, "AA", &above, &below);
+    const int pitch = above + below + 2;
+    return pitch > 0 ? pitch : px + 2;
+}
+
+// 一个 UTF-8 字符的字节长度；非法字节按 1 计。
+// Byte length of one UTF-8 character; an invalid byte counts as one.
+static size_t utf8_char_len(const char* s) {
+    const unsigned char c = (unsigned char)s[0];
+    if (c < 0x80) return 1;
+    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xF0) == 0xE0) return 3;
+    if ((c & 0xF8) == 0xF0) return 4;
+    return 1;
+}
+
+// 解一个 UTF-8 字符；used 回报字节数。
+// Decode one UTF-8 character; used reports its byte length.
+static uint32_t utf8_decode(const char* s, size_t len, size_t* used) {
+    const unsigned char c = (unsigned char)s[0];
+    if (c < 0x80) {
+        *used = 1;
+        return c;
+    }
+    const size_t n = utf8_char_len(s);
+    if (n > len) {
+        *used = 1;
+        return c;
+    }
+    uint32_t cp = c & (0x7Fu >> n);
+    for (size_t i = 1; i < n; ++i) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80) {
+            *used = 1;
+            return c;
+        }
+        cp = (cp << 6) | ((unsigned char)s[i] & 0x3F);
+    }
+    *used = n;
+    return cp;
+}
+
+// 行首禁则：闭符号不起一行。/ Line-head rule: a closing mark never starts a line.
+static bool cjk_closing(uint32_t cp) {
+    switch (cp) {
+        case 0x3001: case 0x3002:                 // 、。
+        case 0x300B: case 0x300D: case 0x300F:   // 》」』
+        case 0x3011: case 0x3015:                 // 】〕
+        case 0xFF01: case 0xFF0C: case 0xFF0E:   // ！，．
+        case 0xFF09: case 0xFF1A: case 0xFF1B: case 0xFF1F:  // ）：；？
+        case 0xFF3D: case 0xFF5D:                 // ］｝
+        case 0x2014: case 0x2019: case 0x201D:   // —’ ”
+        case 0x2026: case 0x2030:                 // …‰
+            return true;
+        default: return false;
+    }
+}
+
+// 行尾禁则：开符号不收一行。/ Line-tail rule: an opening mark never ends a line.
+static bool cjk_opening(uint32_t cp) {
+    switch (cp) {
+        case 0x3008: case 0x300A:                 // 〈《
+        case 0x300C: case 0x300E:                 // 「『
+        case 0x3010: case 0x3014:                 // 【〔
+        case 0xFF08: case 0xFF3B: case 0xFF5B:   // （［｛
+        case 0x2018: case 0x201C:                 // ‘“
+            return true;
+        default: return false;
+    }
+}
+
+// 段内某个字节位置往前找字符起点。/ Find the start of the character ending at an offset.
+static size_t utf8_prev_start(const char* s, size_t at) {
+    size_t p = at;
+    while (p > 0 && ((unsigned char)s[p - 1] & 0xC0) == 0x80) --p;
+    return p > 0 ? p - 1 : 0;
+}
+
+// 前 n 字节的显示宽度（用行内探测缓冲）。
+// Display width of the first n bytes, measured with the line's probe buffer.
+static int seg_width_px(const char* seg, size_t n, int px, char* probe, size_t cap) {
+    if (n > cap - 1) n = cap - 1;
+    memcpy(probe, seg, n);
+    probe[n] = 0;
+    return ui_text_fixed_width_px(px, probe);
+}
+
+// 切点避头尾：闭符号不落行首、开符号不落行尾。拉得动就把符号拉进本行，
+// 拉不动就把本行末尾的字符推到下一行，让符号跟着内容走。
+// Break-point rules: a closing mark never starts a line and an opening mark
+// never ends one. A mark that fits moves onto this line; one that does not
+// pushes the line's last character to the next line so the mark keeps company.
+static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px, int avail,
+                            char* probe, size_t cap) {
+    const size_t original = cut;
+    for (int guard = 0; guard < 16; ++guard) {
+        // 行尾禁则 / line-tail rule
+        if (cut > 0) {
+            const size_t p = utf8_prev_start(seg, cut);
+            size_t used = 0;
+            const uint32_t cp = utf8_decode(seg + p, cut - p, &used);
+            if (cjk_opening(cp)) {
+                size_t next_len = 0;
+                const bool has_next = cut < seg_len;
+                if (has_next) utf8_decode(seg + cut, seg_len - cut, &next_len);
+                if (has_next && cut + next_len < cap &&
+                    seg_width_px(seg, cut + next_len, px, probe, cap) <= avail) {
+                    cut += next_len;  // 下一个字符拉进本行 / pull the next character in
+                    continue;
+                }
+                cut = p;  // 开符号挪到下一行 / move the opening mark down
+                continue;
+            }
+        }
+        // 行首禁则 / line-head rule
+        if (cut < seg_len) {
+            size_t used = 0;
+            const uint32_t cp = utf8_decode(seg + cut, seg_len - cut, &used);
+            if (used > 0 && cjk_closing(cp)) {
+                if (cut + used < cap && seg_width_px(seg, cut + used, px, probe, cap) <= avail) {
+                    cut += used;  // 闭符号拉回本行末端 / pull the closing mark back
+                    continue;
+                }
+                if (cut > 0) {
+                    cut = utf8_prev_start(seg, cut);  // 本行末尾字符推到下一行
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+    // 退化情形（整行只有一个字符）：保留原切点，宁可破一次禁则也不出空行。
+    // Degenerate case (a line of one character): keep the original cut rather
+    // than emit an empty line, even at the price of one broken rule.
+    return cut > 0 ? cut : original;
+}
+
+// 折行与排版：把卡片文本拆成行，量宽度、避头尾、给选项续行悬挂缩进，
+// 并记下每行的高度与缩进。
+// Wrap and lay out: split the card text into lines, measure them, apply the
+// CJK break rules, hang option continuations under their prefix, and record
+// each line's height and indent.
+static void build_card_lines(int px) {
     const char* text = SESS()->text ? SESS()->text : "";
     SESS()->line_count = 0;
     SESS()->line_page = 0;
-    // 反色标记随折行全量赋值，这里再清零一遍，避免复用会话留下脏值。
-    // The invert flags are fully assigned during wrapping; zero them here
-    // too so a reused session never keeps stale values.
+    // 反色与缩进随折行全量赋值，这里再清零一遍，避免复用会话留下脏值。
+    // The invert and indent flags are fully assigned during wrapping; zero
+    // them here too so a reused session never keeps stale values.
     memset(SESS()->line_invert, 0, sizeof(SESS()->line_invert));
-    const int px = body_px();
+    memset(SESS()->line_x, 0, sizeof(SESS()->line_x));
+    const int pitch = body_pitch(px);
     const int width = ui_content_width();
     // 探测缓冲一次分配复用；候选长度先钳到容量内，测量永远是完整候选的
     // 宽度，超长无空格串也会在宽度内被切短。/ One reusable probe buffer;
@@ -289,38 +456,69 @@ static void wrap_card_text(void) {
     // covers the full candidate and long no-space runs still cut to width.
     static char probe[LINE_BUF];
     const size_t max_take = sizeof(probe) - 1;
+    const size_t len = strlen(text);
     size_t i = 0;
-    size_t len = strlen(text);
     while (i < len && SESS()->line_count < LINE_MAX) {
         // 先按换行切段。/ Split on explicit newlines first.
         size_t end = i;
         while (end < len && text[end] != '\n') ++end;
         size_t seg_len = end - i;
         size_t start = i;
-        // \x01 只认段首（渲染层只在行首放它）；段内出现的按普通字符处理。
-        // \x01 counts only at a segment start (the renderer emits it at line
-        // heads only); one inside the text is an ordinary character.
-        bool seg_start = true;
+        // 空段就是一行空行：选择题背面靠它把题干、选项与答案分层。
+        // An empty segment is a blank line: the choice back uses it to layer
+        // the question, the options and the answer.
+        if (seg_len == 0) {
+            SESS()->line_off[SESS()->line_count] = start;
+            SESS()->line_len[SESS()->line_count] = 0;
+            SESS()->line_invert[SESS()->line_count] = false;
+            SESS()->line_height[SESS()->line_count] = (uint16_t)pitch;
+            SESS()->line_x[SESS()->line_count] = 0;
+            ++SESS()->line_count;
+            i = end + 1;
+            continue;
+        }
+        // 选项行首模式：可选 \x01 + 单个 ASCII 字母 + ". "；续行按前缀宽度悬挂。
+        // Option line head: an optional \x01 then one ASCII letter and ". ";
+        // continuations hang under that prefix.
+        int hang = 0;
+        {
+            size_t p = start;
+            if (p < end && text[p] == '\x01') ++p;
+            if (p + 2 < end && text[p + 1] == '.' && text[p + 2] == ' ' &&
+                ((text[p] >= 'A' && text[p] <= 'Z') || (text[p] >= 'a' && text[p] <= 'z'))) {
+                char prefix[4] = {text[p], '.', ' '};
+                prefix[3] = 0;
+                hang = ui_text_fixed_width_px(px, prefix);
+                if (hang > width / 2) hang = width / 2;
+                if (hang > 255) hang = 255;
+            }
+        }
+        bool seg_first = true;
         while (seg_len > 0 && SESS()->line_count < LINE_MAX) {
             // 行首 \x01 为强调标记：该行反色绘制；跳过该字节再开始本行
             // 内容，标记不占显示宽度。/ A leading \x01 is the emphasis
             // marker: the line draws inverted; skip the byte before the line
             // content starts, the marker takes no display width.
             bool invert = false;
-            if (seg_start && text[start] == '\x01') {
+            if (seg_first && text[start] == '\x01') {
                 invert = true;
                 ++start;
                 --seg_len;
             }
-            seg_start = false;
-            if (seg_len == 0) break; // 段仅剩标记：无内容可显示 / marker-only segment
+            if (seg_len == 0) break;  // 段仅剩标记：无内容可显示 / marker-only segment
+            // 首行顶格，续行悬挂在前缀宽度下，可用宽度相应变窄。
+            // The first line sits at the margin; continuations hang under the
+            // prefix, so their usable width shrinks accordingly.
+            const int indent = seg_first ? 0 : hang;
+            const int avail = width - indent;
+            seg_first = false;
             // 贪心折行：能放就放，放不下从最后一个空格断。/ Greedy wrap: fit
             // what fits, break at the last space when a word overflows.
             size_t take = seg_len < max_take ? seg_len : max_take;
             while (take > 1) {
                 memcpy(probe, text + start, take);
                 probe[take] = 0;
-                if (ui_text_fixed_width_px(px, probe) <= width) break;
+                if (ui_text_fixed_width_px(px, probe) <= avail) break;
                 // 二进制+线性混合：先减半再逐字回退，避免超长行反复全量测量。
                 // Halve then step back by characters, so long lines do not
                 // remeasure the whole span each time.
@@ -346,27 +544,84 @@ static void wrap_card_text(void) {
                     cut = k;
                     break;
                 }
-                if (k + 8 < cut) break; // 只回看一小段 / only look back a little
+                if (k + 8 < cut) break;  // 只回看一小段 / only look back a little
             }
+            // 避头尾：切点可能落在标点上，按禁则调整。
+            // The cut may land on punctuation; the break rules settle it.
+            cut = cjk_fix_break(text + start, cut, seg_len, px, avail, probe, sizeof(probe));
             SESS()->line_off[SESS()->line_count] = start;
             SESS()->line_len[SESS()->line_count] = cut;
             SESS()->line_invert[SESS()->line_count] = invert;
+            SESS()->line_height[SESS()->line_count] = (uint16_t)pitch;
+            SESS()->line_x[SESS()->line_count] = (uint8_t)indent;
             ++SESS()->line_count;
             start += cut;
-            while (start < end && text[start] == ' ') ++start; // 吞掉断行空格 / drop the break space
+            while (start < end && text[start] == ' ') ++start;  // 吞掉断行空格 / drop the break space
             seg_len = end - start;
         }
         i = end + 1;
     }
 }
 
-static int lines_per_page(void) {
-    int top = UI_CONTENT_TOP + 8;
-    int bottom = UI_CONTENT_BOTTOM - 8;
-    // 行距与绘制一致：正文按 body_px() 排版，渲染与翻页同步这一口径。
-    // / Pitch matches drawing: the body lays out at body_px() and render
-    // and paging step by the same metric.
-    return (bottom - top) / (body_px() + 10);
+// 内容区高度：页眉分隔线到底栏之间，上下各留 8px；学习页还要给底部提示
+// 行（正面）或评分按钮（背面）让位，否则最后一行会压在提示或按钮上。
+// Height of the content band: between the header rule and the bar, 8px clear
+// on each side; the study page also leaves room for the bottom hint (front)
+// or the grade buttons (back), so the last line never lands on them.
+static int study_content_height(void) {
+    const int bottom = SESS()->show_back ? (UI_CONTENT_BOTTOM - UI_BTN_H - 4)
+                                          : (UI_CONTENT_BOTTOM - UI_PX_CAPTION - 10);
+    return bottom - (UI_CONTENT_TOP + 8);
+}
+
+// 全部行高之和。/ Sum of every line height.
+static int card_total_height(void) {
+    int total = 0;
+    for (int i = 0; i < SESS()->line_count; ++i) total += SESS()->line_height[i];
+    return total;
+}
+
+// 排版并按目标页数自适应字号：正文太长时字号按 -2 步进缩小，取第一个
+// 不超标的字号，下限 16px。只作用于学习视图正文，列表等固定字号不动。
+// Lay the card out and shrink the type when it runs past the page target:
+// the size steps down by 2 and the first size that fits wins, with a 16px
+// floor. Only the study body is affected; fixed-size lists stay untouched.
+static void layout_card(void) {
+    int px = body_px();
+    for (;;) {
+        build_card_lines(px);
+        if (px <= ANKI_MIN_BODY_PX) break;
+        if (card_total_height() <= study_content_height() * ANKI_PAGES_TARGET) break;
+        px -= 2;
+    }
+    SESS()->text_px = px;
+}
+
+// 按累计行高分页：给出指定页的首行、行数与总页数。
+// Page by accumulated line height: the first line, the line count and the
+// total page count of one page.
+static void study_page_map(int want, int* first, int* count, int* pages) {
+    const int limit = study_content_height();
+    int page = 0, used = 0;
+    *first = 0;
+    *count = 0;
+    *pages = 1;
+    bool taking = want == 0;
+    for (int i = 0; i < SESS()->line_count; ++i) {
+        int h = SESS()->line_height[i];
+        if (h <= 0) h = 1;
+        if (used > 0 && used + h > limit) {
+            ++page;
+            used = 0;
+            taking = want == page;
+        }
+        if (taking) {
+            if (*count == 0) *first = i;
+            ++*count;
+        }
+        used += h;
+    }
+    *pages = page + 1;
 }
 
 static void session_load_back(void);
@@ -375,14 +630,14 @@ static void session_open_card(void) {
     SESS()->show_back = false;
     SESS()->back_loaded = false;
     SESS()->text = SESS()->front;
-    wrap_card_text();
+    layout_card();
 }
 
 static void session_show_back(void) {
     SESS()->show_back = true;
     if (!SESS()->back_loaded) session_load_back();
     SESS()->text = SESS()->back;
-    wrap_card_text();
+    layout_card();
 }
 
 /// 已载入卡组的内容视图。/ Content view over the loaded deck.
@@ -554,31 +809,36 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
             snprintf(progress, sizeof(progress), "%d/%d", SESS()->session_pos + 1,
                      SESS()->session_count);
             ui_draw_header(fb, SESS()->deck.name, progress);
-            int per = lines_per_page();
-            if (SESS()->line_page >= (SESS()->line_count + per - 1) / (per > 0 ? per : 1))
-                SESS()->line_page = 0;
-            int pages = SESS()->line_count > 0
-                            ? 1 + (SESS()->line_count - 1) / (per > 0 ? per : 1)
-                            : 1;
-            if (SESS()->line_page >= pages) SESS()->line_page = pages - 1;
-            int first = SESS()->line_page * per;
+            // 分页与绘制共用一套累计高度：页数、每页首行与行高来自同一次排版。
+            // Paging and drawing share one accumulated height: the page
+            // count, each page's first line and the line heights all come
+            // from the same layout.
+            int first = 0, count = 0, pages = 1;
+            study_page_map(SESS()->line_page, &first, &count, &pages);
+            if (SESS()->line_page >= pages) {
+                SESS()->line_page = pages > 0 ? pages - 1 : 0;
+                study_page_map(SESS()->line_page, &first, &count, &pages);
+            }
             int y = UI_CONTENT_TOP + 8;
-            // 行距与 lines_per_page/wrap 同口径，页面计数与绘制不会错位。
-            // / Same pitch as lines_per_page/wrap so paging and drawing agree.
-            const int pitch = body_px() + 10;
             char line[LINE_BUF];
-            for (int i = first; i < first + per && i < SESS()->line_count; ++i) {
+            for (int k = 0; k < count; ++k) {
+                const int i = first + k;
                 size_t n = SESS()->line_len[i];
                 if (n >= sizeof(line)) n = sizeof(line) - 1;
                 memcpy(line, SESS()->text + SESS()->line_off[i], n);
                 line[n] = 0;
                 // 行首带 \x01 强调标记的行反色绘制（黑底白字），墨水屏上
-                // 清晰醒目；其余行常规黑字。/ Lines carrying the leading \x01
-                // emphasis marker draw inverted (white on black) for clarity
-                // on e-paper; every other line draws ordinary black.
-                ui_text(fb, UI_MARGIN, y, UI_PX_BODY, line, EPD_DRAW_ALIGN_LEFT,
-                        SESS()->line_invert[i]);
-                y += pitch;
+                // 清晰醒目；其余行常规黑字。行首缩进来自排版结果，选项续行
+                // 悬挂在前缀宽度下。/ Lines carrying the leading \x01 emphasis
+                // marker draw inverted (white on black) for clarity on
+                // e-paper; every other line draws ordinary black. The indent
+                // comes from the layout, so option continuations hang under
+                // their prefix.
+                if (n > 0) {
+                    ui_text_fixed(fb, UI_MARGIN + SESS()->line_x[i], y, SESS()->text_px, line,
+                                  EPD_DRAW_ALIGN_LEFT, SESS()->line_invert[i]);
+                }
+                y += SESS()->line_height[i];
             }
             if (SESS()->line_count == 0) {
                 ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 8, UI_PX_BODY, "[空卡片]",
@@ -612,7 +872,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                     EPD_DRAW_ALIGN_LEFT, false);
             snprintf(line, sizeof(line), "记住 %d · 忘记 %d", SESS()->good_or_better,
                      SESS()->again);
-            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + body_px() + 12, UI_PX_BODY, line,
+            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + body_pitch(body_px()), UI_PX_BODY, line,
                     EPD_DRAW_ALIGN_LEFT, false);
             ui_draw_button(fb, bar_button_rect(), "返回卡组 Back", false);
             ui_draw_menu_handle(fb, false);
@@ -915,9 +1175,8 @@ static app_redraw_t on_gesture(app_ctx_t* ctx, const ui_gesture_event_t* event) 
         case UI_GESTURE_SWIPE_U:
         case UI_GESTURE_SWIPE_D: {
             if (s_view != ANKI_VIEW_STUDY) return APP_REDRAW_NONE;
-            int per = lines_per_page();
-            int pages =
-                SESS()->line_count > 0 ? 1 + (SESS()->line_count - 1) / (per > 0 ? per : 1) : 1;
+            int first = 0, count = 0, pages = 1;
+            study_page_map(SESS()->line_page, &first, &count, &pages);
             if (pages <= 1) return APP_REDRAW_NONE;
             if (event->type == UI_GESTURE_SWIPE_U) {
                 if (SESS()->line_page + 1 < pages) ++SESS()->line_page;
