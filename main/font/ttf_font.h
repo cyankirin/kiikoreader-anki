@@ -89,6 +89,10 @@ bool ttf_font_ready(void);
 bool ttf_font_has_text(const char *text);
 int ttf_ascender(int size);
 int ttf_ascender_px(int pixel_height);
+/// 字体的下延伸（基线以下的设计高度），与 ttf_ascender_px 合起来是行盒。
+/// The font's descender (design height below the baseline); together with
+/// ttf_ascender_px it forms the line box.
+int ttf_descender_px(int pixel_height);
 /// 将设计的 em 字号换算为活动字体的原生栅格高度，不缩放字形位图。
 /// Convert a design em size to the active face's native raster height without bitmap scaling.
 int ttf_em_height_px(int em_size);

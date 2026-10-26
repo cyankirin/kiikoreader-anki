@@ -290,16 +290,26 @@ static int body_px(void) {
     return ui_text_effective_px(UI_PX_BODY);
 }
 
-// 行距按当前字体的真实上下延伸量算：字形实际占多高，行就占多高。
-// 字体分支与 ui_text_fixed 一致（ui_text_uses_builtin），量出的行高才和
-// 画出来的一致。/ The pitch follows the font's real extents: a line takes
-// exactly what its glyphs need. The font branch matches ui_text_fixed
-// (ui_text_uses_builtin) so the measured pitch is the drawn one.
-static int body_pitch(int px) {
+// 行距按字体的真实行盒算：上延伸 + 下延伸，字形都落在里面，相邻两行的
+// 墨迹就不会叠上。两条字体分支都算取大者：内建字库缺字的行会回退到 TTF，
+// 两个行盒都得兜住。内建补充字库（ui-hanzi.bin）的位图可能高出行盒，
+// 再按正文实测补一刀。
+// 不用硬编码的拉丁样本量行高：汉字的字形盒比拉丁高得多，用 "AA" 量会把
+// 中文行距压短，相邻两行的墨迹就会粘在一起。
+// The pitch follows the font's real line box (ascent + descent): every glyph
+// lives inside it, so neighbouring lines cannot overlap. Both font branches
+// are measured and the larger wins, because a line missing a glyph in the
+// built-in face falls back to the TTF. The built-in supplementary bitmaps
+// (ui-hanzi.bin) can exceed the line box, so the actual text is measured as
+// a floor. A hardcoded Latin sample would under-measure Chinese lines.
+static int body_pitch(int px, const char* text) {
+    int box = ui_font_ascender_px(px) + ui_font_descender_px(px);
+    const int ttf_box = ttf_ascender_px(px) + ttf_descender_px(px);
+    if (ttf_box > box) box = ttf_box;
     int above = 0, below = 0;
-    if (ui_text_uses_builtin("AA")) ui_font_measure_line_px(px, "AA", &above, &below);
-    else ttf_measure_line_px(px, "AA", &above, &below);
-    const int pitch = above + below + 2;
+    ui_font_measure_line_px(px, text, &above, &below);
+    if (above + below > box) box = above + below;
+    const int pitch = box + 2;
     return pitch > 0 ? pitch : px + 2;
 }
 
@@ -435,11 +445,12 @@ static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px,
 }
 
 // 折行与排版：把卡片文本拆成行，量宽度、避头尾、给选项续行悬挂缩进，
-// 并记下每行的高度与缩进。
+// 并记下每行的高度与缩进。pitch 由调用方按字号给（行盒随字号成正比）。
 // Wrap and lay out: split the card text into lines, measure them, apply the
 // CJK break rules, hang option continuations under their prefix, and record
-// each line's height and indent.
-static void build_card_lines(int px) {
+// each line's height and indent. The caller supplies the pitch, which
+// scales with the type size.
+static void build_card_lines(int px, int pitch) {
     const char* text = SESS()->text ? SESS()->text : "";
     SESS()->line_count = 0;
     SESS()->line_page = 0;
@@ -448,7 +459,6 @@ static void build_card_lines(int px) {
     // them here too so a reused session never keeps stale values.
     memset(SESS()->line_invert, 0, sizeof(SESS()->line_invert));
     memset(SESS()->line_x, 0, sizeof(SESS()->line_x));
-    const int pitch = body_pitch(px);
     const int width = ui_content_width();
     // 探测缓冲一次分配复用；候选长度先钳到容量内，测量永远是完整候选的
     // 宽度，超长无空格串也会在宽度内被切短。/ One reusable probe buffer;
@@ -512,17 +522,23 @@ static void build_card_lines(int px) {
             const int indent = seg_first ? 0 : hang;
             const int avail = width - indent;
             seg_first = false;
-            // 贪心折行：能放就放，放不下从最后一个空格断。/ Greedy wrap: fit
-            // what fits, break at the last space when a word overflows.
-            size_t take = seg_len < max_take ? seg_len : max_take;
-            while (take > 1) {
-                memcpy(probe, text + start, take);
-                probe[take] = 0;
-                if (ui_text_fixed_width_px(px, probe) <= avail) break;
-                // 二进制+线性混合：先减半再逐字回退，避免超长行反复全量测量。
-                // Halve then step back by characters, so long lines do not
-                // remeasure the whole span each time.
-                take = take > 16 ? take - take / 4 : take - 1;
+            // 二分找能放下的最大长度：比 25% 步长收缩更准（后者每行都留
+            // 下一大片空白，行数因此偏多），测量次数也少。
+            // Binary-search the longest fitting length: the old 25% shrink
+            // left a wide gap on every line (and so produced extra lines),
+            // while this needs fewer measurements.
+            size_t lo = 1, hi = seg_len < max_take ? seg_len : max_take;
+            size_t take = 1;
+            while (lo <= hi) {
+                const size_t mid = lo + (hi - lo) / 2;
+                memcpy(probe, text + start, mid);
+                probe[mid] = 0;
+                if (ui_text_fixed_width_px(px, probe) <= avail) {
+                    take = mid;
+                    lo = mid + 1;
+                } else {
+                    hi = mid - 1;
+                }
             }
             // 截断点对齐 UTF-8 字符边界：text[start+take] 是续行字节说明
             // 切在了多字节字符中间，回退到字符起点；take 已缩到 1 且首字节
@@ -583,13 +599,23 @@ static int card_total_height(void) {
 
 // 排版并按目标页数自适应字号：正文太长时字号按 -2 步进缩小，取第一个
 // 不超标的字号，下限 16px。只作用于学习视图正文，列表等固定字号不动。
+// 行距与字号成正比（字形盒按字号线性缩放），所以只在基准字号量一次，
+// 其余字号按比例缩放，不必每档重新量字形。
 // Lay the card out and shrink the type when it runs past the page target:
 // the size steps down by 2 and the first size that fits wins, with a 16px
 // floor. Only the study body is affected; fixed-size lists stay untouched.
+// The pitch scales with the type size (glyph boxes scale linearly), so it is
+// measured once at the base size and scaled for the rest.
 static void layout_card(void) {
-    int px = body_px();
+    const int px0 = body_px();
+    const char* text = SESS()->text ? SESS()->text : "";
+    const int pitch0 = body_pitch(px0, text);
+    int px = px0;
     for (;;) {
-        build_card_lines(px);
+        // 向上取整：宁松勿紧，行距比字形盒差一像素也不会压字。
+        // Round up: a pitch one pixel larger than the glyph box is safe.
+        const int pitch = px == px0 ? pitch0 : (int)(((long)pitch0 * px + px0 - 1) / px0);
+        build_card_lines(px, pitch);
         if (px <= ANKI_MIN_BODY_PX) break;
         if (card_total_height() <= study_content_height() * ANKI_PAGES_TARGET) break;
         px -= 2;
@@ -872,7 +898,7 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                     EPD_DRAW_ALIGN_LEFT, false);
             snprintf(line, sizeof(line), "记住 %d · 忘记 %d", SESS()->good_or_better,
                      SESS()->again);
-            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + body_pitch(body_px()), UI_PX_BODY, line,
+            ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40 + body_pitch(body_px(), ""), UI_PX_BODY, line,
                     EPD_DRAW_ALIGN_LEFT, false);
             ui_draw_button(fb, bar_button_rect(), "返回卡组 Back", false);
             ui_draw_menu_handle(fb, false);

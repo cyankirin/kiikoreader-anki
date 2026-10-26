@@ -207,6 +207,7 @@ typedef struct {
     bool f_data_borrowed;
     ttf_size_metrics_t f_size_metrics[2];
     int f_raw_ascent_units;
+    int f_raw_descent_units;
     int f_weight;
     int f_wght_min;
     int f_wght_def;
@@ -271,6 +272,7 @@ static int s_cur_index = TTF_FONT_SLOT_SYSTEM;
 #define font_data_borrowed (s_cur->f_data_borrowed)
 #define size_metrics (s_cur->f_size_metrics)
 #define raw_ascent_units (s_cur->f_raw_ascent_units)
+#define raw_descent_units (s_cur->f_raw_descent_units)
 #define current_weight (s_cur->f_weight)
 #define wght_min (s_cur->f_wght_min)
 #define wght_def (s_cur->f_wght_def)
@@ -2124,6 +2126,19 @@ int ttf_ascender_px(int pixel_height) {
     );
 }
 
+// 字体的下延伸（基线以下的设计高度）。字形都落在「上延伸 + 下延伸」这个
+// 行盒里，行距按它算就不会让相邻两行的墨迹叠上。
+// The font's descender (design height below the baseline). Glyphs live inside
+// the ascent+descent line box, so a pitch taken from it keeps neighbouring
+// lines from overlapping.
+int ttf_descender_px(int pixel_height) {
+    if (!font_ready) return 0;
+    pixel_height = clamp_px(pixel_height);
+    return (int)lroundf(
+        raw_descent_units * stbtt_ScaleForPixelHeight(&font_info, (float)pixel_height)
+    );
+}
+
 int ttf_em_height_px(int em_size) {
     if (!font_ready) return clamp_px(em_size);
     if (em_size < 1) em_size = 1;
@@ -2197,6 +2212,7 @@ static void unload_here(void) {
     file_loca_len = 0;
     loca_long = false;
     raw_ascent_units = 0;
+    raw_descent_units = 0;
     memset(&font_info, 0, sizeof(font_info));
     memset(size_metrics, 0, sizeof(size_metrics));
 }
@@ -2250,6 +2266,7 @@ static esp_err_t load_opened_font(void) {
     int raw_ascent = 0, raw_descent = 0, raw_gap = 0;
     stbtt_GetFontVMetrics(&font_info, &raw_ascent, &raw_descent, &raw_gap);
     raw_ascent_units = raw_ascent;
+    raw_descent_units = raw_descent < 0 ? -raw_descent : raw_descent;
     const int pixel_heights[2] = { TTF_PIXEL_SMALL, TTF_PIXEL_LARGE };
     for (int i = 0; i < 2; i++) {
         size_metrics[i].scale = stbtt_ScaleForPixelHeight(&font_info, (float)pixel_heights[i]);
