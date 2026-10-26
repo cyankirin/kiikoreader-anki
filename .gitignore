@@ -54,6 +54,9 @@ tools/buzzer_score_wav
 !/flash/firmware.bin
 !/flash/ota_data_initial.bin
 !/flash/Pico-update*.bin
+# Anki 分支发布的应用分区固件（供 Flash Download Tool 烧到 0x10000）
+# App-partition firmware published with the Anki fork (flash at 0x10000).
+!/firmware/*.bin
 !/flash/releases/*/bootloader.bin
 !/flash/releases/*/partitions.bin
 !/flash/releases/*/ota_data_initial.bin

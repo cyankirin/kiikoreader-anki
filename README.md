@@ -8,6 +8,15 @@ Official firmware binaries are stored in [GitHub Releases](https://github.com/we
 
 [简体中文](README.zh-CN.md) · [日本語](README.ja-JP.md) · [Third-party notices](THIRD_PARTY_NOTICES.md)
 
+## 🅰 Added in this fork: Anki deck study (0.3.3-rc100.02)
+
+This fork ports Anki deck study onto official **rc100**: import an `.apkg`, review with Anki scheduling on the device, with lettered single/multi-choice options, inverted wrong answers, and layout tuned for the font size and the e-ink panel.
+
+- **Firmware**: [`firmware/Read_Pico-0.3.3-rc100.02.bin`](firmware/Read_Pico-0.3.3-rc100.02.bin) (app partition only, flash at `0x10000`)
+- **Flashing guide (Chinese)**: [docs/anki-flash-guide.md](docs/anki-flash-guide.md)
+- **Change log**: [docs/CHANGELOG.md](docs/CHANGELOG.md), sections `0.3.3-rc99.01` … `0.3.3-rc100.02`
+
+
 An independent reading firmware with publicly available source for the **MindReset RDP-G01-W** ESP32-S3 e-paper board. It is based on [MindReset's official demo firmware](https://github.com/MindReset/read_pico_firmware), but is **not an official MindReset release**. Licenses apply by scope as described above.
 
 The current interface has Home, Bookshelf, Files, and Settings. It reads EPUB and TXT books from a TF card, remembers reading progress, and supports Wi-Fi, hotspot, or USB file transfer. The online flasher installs the same firmware image as the local `flash/` bundle.
