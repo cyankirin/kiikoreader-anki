@@ -81,8 +81,10 @@ template script:
 | `main/CMakeLists.txt` | 新增 `anki/` 源与包含目录。Adds the anki sources and include dir. |
 | `tools/gen_anki_fixtures.py` | 宿主夹具：真实 SQLite 集合打包成 `.apkg`（v2/v3/v1 调度/大库/坏文件）。Host fixtures: real SQLite collections packed as .apkg. |
 | `tools/anki_host_test.c`、`tools/run_anki_host_tests.sh` | 宿主测试与运行脚本（CI 同款参数）。Host test and runner (same flags as CI). |
+| `tools/anki_walkthrough.c`、`tools/run_anki_walkthrough.sh` | 端到端走查：对一份真实 `.apkg` 跑导入→列表→载入→会话→渲染→评分→落盘→重载→删除，断言全在宿主上执行。卡组路径必须传参，工具不内置任何本机目录。End-to-end walkthrough over a real `.apkg` (import, list, load, session, render, grade, persist, reload, delete), all asserted on the host. The deck path is always an argument, so the tool carries no built-in local directory. |
 | `tools/anki_stubs/` | 宿主替身头文件与 vendored miniz（tinfl）。Host stand-in headers and vendored miniz (tinfl). |
-| `tools/anki_layout_probe.c`、`tools/run_anki_layout_probe.sh` | 排版探针：直接 include 真机的排版头文件，只把字宽与字体度量换成确定性假实现；判据用探针自己的标点表与墨迹模型，不拿被测函数当判据。Layout probe: includes the real layout header and only swaps the widths and font metrics for deterministic fakes; its oracles are its own punctuation tables and ink model, never the function under test. || `tools/run_anki_layout_probe_mutations.sh` | 探针的变异验证：故意打断真机排版代码里的禁则分类与悬挂缩进，探针必须失败；探针若在变异下仍然通过，说明断言无效。Mutation check: breaks the real break rules and hanging indent on purpose and requires the probe to fail. |
+| `tools/anki_layout_probe.c`、`tools/run_anki_layout_probe.sh` | 排版探针：直接 include 真机的排版头文件，只把字宽与字体度量换成确定性假实现；判据用探针自己的标点表与墨迹模型，不拿被测函数当判据。Layout probe: includes the real layout header and only swaps the widths and font metrics for deterministic fakes; its oracles are its own punctuation tables and ink model, never the function under test. |
+| `tools/run_anki_layout_probe_mutations.sh` | 探针的变异验证：故意打断真机排版代码里的禁则分类与悬挂缩进，探针必须失败；探针若在变异下仍然通过，说明断言无效。Mutation check: breaks the real break rules and hanging indent on purpose and requires the probe to fail. |
 
 ## 依赖 / Dependencies
 
@@ -141,6 +143,7 @@ template script:
 
 ```sh
 bash tools/run_anki_host_tests.sh        # 需要 gcc/clang + Python3
+bash tools/run_anki_walkthrough.sh <deck.apkg>  # 端到端走查：需自备真实卡组（基准 1375 卡）
 bash tools/run_anki_layout_probe.sh     # 排版探针：禁则、缩进、行利用率、自适应字号
 bash tools/run_anki_layout_probe_mutations.sh   # 变异验证：探针必须抓得住打断
 ```
@@ -150,6 +153,13 @@ bash tools/run_anki_layout_probe_mutations.sh   # 变异验证：探针必须抓
 Covers JSON unescaping and malformed rejection, SQLite endianness/overflow/
 multi-page b-trees/WAL rejection, v2/v3/v1 imports, template conditionals and
 cloze, and the store round trip (write, load, grade, save, reload).
+
+走查脚本在同一份存储代码上把整条链路跑一遍：导入→列表→载入最大卡组→会话→
+逐张渲染→评分 8 张并落盘→重载核对→删除，用来在真机之外抓跨模块回归。
+The walkthrough script runs the whole chain over the same storage code —
+import, list, load the largest deck, session, render every session card, grade
+and persist eight cards, reload and verify, then delete — as a cross-module
+regression check that runs off-device.
 
 排版探针覆盖：禁则（行首不落闭符号、行尾不落开符号）、选项续行的悬挂缩进、
 每行的宽度上限与利用率、相邻两行的墨迹不重叠、以及过长正文缩到 16px 下限。

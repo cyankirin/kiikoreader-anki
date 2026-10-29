@@ -1,8 +1,25 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
- * 中文：QA 独立 walkthrough —— 对真实 /e/picoread+anki/2025.apkg 跑
- *       导入→列表→载入→会话→渲染→评分→持久化→重载→删除 全链路。
- *       English: QA independent walkthrough — import→list→load→session→
- *       render→grade→persist→reload→delete over the real 2025.apkg.
+ * 中文：通用 Anki 走查工具 —— 对一份真实 .apkg 端到端跑
+ *       导入→列表→载入→会话→渲染→评分→持久化→重载→删除 全链路，
+ *       全部断言在宿主上执行，不碰真机。
+ *       English: generic Anki walkthrough — runs the whole
+ *       import→list→load→session→render→grade→persist→reload→delete chain
+ *       over a real .apkg. Every assertion runs on the host; no device needed.
+ *
+ * 用法 / Usage:
+ *   anki_walkthrough <deck.apkg>
+ *   bash tools/run_anki_walkthrough.sh <deck.apkg>
+ * 卡组路径必须由调用方给出（没有内置默认值，工具不认识任何本机目录）。
+ * The deck path is always supplied by the caller; there is no built-in
+ * default, so the tool knows nothing about any one machine's directory layout.
+ *
+ * 断言里的「基准卡数」对应仓库 QA 的基准卡组（rc99.03 基线 1375 卡）。
+ * 换别的卡组时用 -DANKI_WALKTHROUGH_CARDS=<n> 覆盖；其余断言都自洽，
+ * 不依赖具体卡组。
+ * The card-count assertion encodes the repository QA baseline deck (1375
+ * cards, the rc99.03 baseline). Point it at another deck by passing
+ * -DANKI_WALKTHROUGH_CARDS=<n>; every other assertion is self-consistent and
+ * independent of the deck.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -18,6 +35,13 @@
 
 /* 存储模块依赖 book_store 的挂载助手；宿主恒成功。/ Mount helper stub. */
 esp_err_t book_store_ensure_flash(void) { return ESP_OK; }
+
+/* 基准卡数：默认是仓库 QA 基准卡组（rc99.03 基线 1375 卡）。
+/ Baseline card count: the repository QA deck by default (rc99.03 baseline,
+1375 cards). Override with -DANKI_WALKTHROUGH_CARDS=<n> for another deck. */
+#ifndef ANKI_WALKTHROUGH_CARDS
+#define ANKI_WALKTHROUGH_CARDS 1375
+#endif
 
 static int failures;
 static int checks;
@@ -94,7 +118,13 @@ static bool visit_deck(const anki_deck_summary_t* s, void* ctx) {
 }
 
 int main(int argc, char** argv) {
-    const char* apkg = argc > 1 ? argv[1] : "/e/picoread+anki/2025.apkg";
+    /* 卡组路径必须传参：没有默认值，也就没有本机路径。
+    / The deck path is always an argument — no default, so no local path. */
+    if (argc < 2 || argv[1] == NULL || argv[1][0] == '\0') {
+        fprintf(stderr, "usage: anki_walkthrough <deck.apkg>\n");
+        return 2;
+    }
+    const char* apkg = argv[1];
     printf("== QA walkthrough: %s ==\n", apkg);
 
     /* ---------- 1. 直接导入解析 / raw import parse ---------- */
@@ -103,8 +133,9 @@ int main(int argc, char** argv) {
     printf("import: decks=%d notes=%d cards=%d notetypes=%d\n", imp.deck_count,
            imp.note_count, imp.card_count, imp.notetype_count);
     CHECK(imp.deck_count >= 1);
-    /* rc99.03 基线：1375 卡。/ rc99.03 baseline: 1375 cards. */
-    CHECK(imp.card_count == 1375);
+    /* 基准卡数（默认 rc99.03 基线 1375 卡）。
+    / Baseline card count (1375 cards, the rc99.03 baseline, by default). */
+    CHECK(imp.card_count == ANKI_WALKTHROUGH_CARDS);
     CHECK(imp.note_count > 0);
     CHECK(imp.notetype_count > 0);
 

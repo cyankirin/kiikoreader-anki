@@ -12,7 +12,7 @@ Official firmware binaries are stored in [GitHub Releases](https://github.com/we
 
 This fork ports Anki deck study onto official **rc102**: import an `.apkg`, review with Anki scheduling on the device, with lettered single/multi-choice options, inverted wrong answers, and layout tuned for the font size and the e-ink panel.
 
-- **Firmware**: [`firmware/Read_Pico-0.3.3-rc102.01.bin`](firmware/Read_Pico-0.3.3-rc102.01.bin) (app partition only, flash at `0x10000`)
+- **Firmware**: the binary ships with the repository — [`firmware/Read_Pico-0.3.3-rc102.01.bin`](firmware/Read_Pico-0.3.3-rc102.01.bin) is the source you can use today (app partition only, flash at `0x10000`). If this repository's **Releases** page publishes the matching version, prefer the release asset (it carries the release notes); to roll back, use [`firmware/Read_Pico-0.3.3-rc100.02.bin`](firmware/Read_Pico-0.3.3-rc100.02.bin).
 - **Flashing guide (Chinese)**: [docs/anki-flash-guide.md](docs/anki-flash-guide.md) — back up settings first, full-flash official rc102, then this app image at `0x10000`, factory reset, restore settings
 - **Change log**: [docs/CHANGELOG.md](docs/CHANGELOG.md), sections `0.3.3-rc99.01` … `0.3.3-rc102.01`
 

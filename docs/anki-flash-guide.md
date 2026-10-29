@@ -2,7 +2,7 @@
 
 本分支在 **kiikoread 官方 rc102** 基础上移植了 Anki 卡组学习功能，版本号 **0.3.3-rc102.01**。
 
-固件文件： [`firmware/Read_Pico-0.3.3-rc102.01.bin`](../firmware/Read_Pico-0.3.3-rc102.01.bin)（3.3 MB，只烧应用分区 0x10000）
+固件文件：固件随仓库提供 —— [`firmware/Read_Pico-0.3.3-rc102.01.bin`](../firmware/Read_Pico-0.3.3-rc102.01.bin)（3.3 MB，**当前可用来源**，只烧应用分区 0x10000）。若本仓库的 **Releases** 页面发布了对应版本，优先使用 Release 附件（含版本说明）；需要回滚时使用 [`firmware/Read_Pico-0.3.3-rc100.02.bin`](../firmware/Read_Pico-0.3.3-rc100.02.bin)。
 
 ---
 
