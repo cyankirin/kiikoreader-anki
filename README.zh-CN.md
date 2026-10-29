@@ -8,13 +8,13 @@
 
 [English](README.md) · [日本語](README.ja-JP.md) · [第三方许可](THIRD_PARTY_NOTICES.md)
 
-## 🅰 本仓库新增：Anki 卡组学习（0.3.3-rc100.02）
+## 🅰 本仓库新增：Anki 卡组学习（0.3.3-rc102.01）
 
-本仓库在官方 **rc100** 基础上移植了 Anki 卡组学习功能：导入 `.apkg` 后在设备上按 Anki 调度复习，支持单选/多选题的选项标注、错误项反色、按字号与墨水屏分辨率自适应排版。
+本仓库在官方 **rc102** 基础上移植了 Anki 卡组学习功能：导入 `.apkg` 后在设备上按 Anki 调度复习，支持单选/多选题的选项标注、错误项反色、按字号与墨水屏分辨率自适应排版。
 
-- **固件下载**：[`firmware/Read_Pico-0.3.3-rc100.02.bin`](firmware/Read_Pico-0.3.3-rc100.02.bin)（只烧 0x10000 应用分区）
-- **刷机与使用说明**：[docs/anki-flash-guide.md](docs/anki-flash-guide.md)（**先备份配置** → 线刷官方 rc100 → Flash Download Tool 烧 0x10000 → 恢复出厂设置 → `.apkg` 放 TF 卡 `/anki/`）
-- **改动明细**：[docs/CHANGELOG.md](docs/CHANGELOG.md) 的 `0.3.3-rc99.01` ~ `0.3.3-rc100.02` 段
+- **固件下载**：[`firmware/Read_Pico-0.3.3-rc102.01.bin`](firmware/Read_Pico-0.3.3-rc102.01.bin)（只烧 0x10000 应用分区）
+- **刷机与使用说明**：[docs/anki-flash-guide.md](docs/anki-flash-guide.md)（**先备份配置** → 线刷官方 rc102 → Flash Download Tool 烧 0x10000 → 恢复出厂设置 → `.apkg` 放 TF 卡 `/anki/`）
+- **改动明细**：[docs/CHANGELOG.md](docs/CHANGELOG.md) 的 `0.3.3-rc99.01` ~ `0.3.3-rc102.01` 段
 
 
 这是为 **MindReset RDP-G01-W** 墨水屏开发板制作的独立阅读固件，源码公开，许可按上述范围分别适用。项目基于 [MindReset 官方示例固件](https://github.com/MindReset/read_pico_firmware) 开发，**并非 MindReset 官方发布**。

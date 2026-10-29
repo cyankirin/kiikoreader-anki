@@ -30,14 +30,20 @@ const char* app_sleep_mode_name(app_sleep_mode_t mode);
 /// Power-menu shutdown: false powers fully off; true light-sleeps for 10 minutes, then PMU soft-sleeps.
 bool app_settings_staged_shutdown(void);
 void app_settings_set_staged_shutdown(bool staged);
-/// 电源键解锁/深睡唤醒次数：默认 1；设置首页开启“双击解锁”后为 2。
-/// Power-key unlock/deep-wake presses: defaults to 1; enable double-press unlock on Settings home for 2.
+/// 电源键开机次数：1 单击开机，2 双击开机；默认 1，已保存的选择继续保留。
+/// Power-key boot presses: 1 boots on a single press, 2 needs a double click; defaults to 1 and retains an explicit saved choice.
 uint8_t app_settings_wake_presses(void);
 void app_settings_set_wake_presses(uint8_t presses);
-/// 首页进入时强制全刷；默认关闭。/ Full refresh when entering Home; off by default.
+/// 可选密码宽限期0/5/60/480/1440分钟，默认关闭。/ Optional PIN grace0/5/60/480/1440min, off by default.
+uint8_t app_settings_pin_grace_code(void);
+void app_settings_set_pin_grace_code(uint8_t code);
+unsigned app_settings_pin_grace_minutes(void);
+uint32_t app_settings_pin_locked_at(void);
+void app_settings_record_pin_lock(uint32_t unix_seconds);
+/// 首页进入时强制全刷；无配置时默认开启，保留已保存的选择。/ Full refresh when entering Home; on when unconfigured, retaining saved choices.
 bool app_settings_home_full_refresh(void);
 void app_settings_set_home_full_refresh(bool enabled);
-/// 首页组件默认书夹；选择与每日目标均掉电保存。/ Persist the Home widget and daily goal across power loss.
+/// 首页组件无配置时默认Moon Clock；选择与每日目标掉电保存。/ Default to Moon Clock when unconfigured; persist the widget and daily goal.
 typedef enum {
     APP_HOME_FOLDER = 0, APP_HOME_CLOCK = 1, APP_HOME_ASTERISK = 2,
     // 3为旧组件的保留编号，不能重排已有配置。/ ID 3 is retired; preserve existing persisted IDs.
@@ -115,6 +121,7 @@ const char *app_settings_book_background_path(void);
 bool app_settings_set_book_background_path(const char *path);
 /// 阅读时每 5/10/15/30 页全刷；0 关闭周期全刷，手动全刷仍可用。
 /// Full-screen cleanup every 5/10/15/30 turns; 0 disables periodic cleanup only.
+/// S31另支持20页，所有翻页效果均遵循所选间隔。/ S31 also supports20; every turn effect respects the selected interval.
 uint8_t app_settings_reader_full_pages(void);
 void app_settings_set_reader_full_pages(uint8_t pages);
 /// 阅读翻页效果：0普通，1水波纹，2速读黑白；旧0/1配置不变。/ Reader effect:0 ordinary,1 ripple,2 fast BW; preserve legacy0/1 settings.
@@ -206,7 +213,7 @@ uint8_t app_settings_book_paragraph_value(uint8_t level);
 uint8_t app_settings_book_paragraph_level(uint8_t percent);
 uint8_t app_settings_book_paragraph_spacing(void);
 void app_settings_set_book_paragraph_spacing(uint8_t percent);
-/// 书架样式：1 深色书轨、2 亚克力、5 列表；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5); retired IDs 3/4 fall back to 2.
+/// 书架样式：1 深色书轨、2 亚克力、5 列表、6 液态玻璃；旧3/4安全回退2。/ Shelf styles: rail (1), acrylic (2), list (5), liquid glass (6); retired IDs 3/4 fall back to 2.
 uint8_t app_settings_shelf_style(void);
 void app_settings_set_shelf_style(uint8_t style);
 /// 固定 TF 根目录：/sdcard/books 与 /sdcard/fonts；旧配置/备份不能修改。/ Fixed TF roots, unaffected by legacy settings/backups.

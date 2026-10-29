@@ -45,6 +45,8 @@ esp_err_t read_pico_transfer_import_wifi_backup(const read_pico_transfer_wifi_ba
     return ESP_OK;
 }
 
+static uint8_t loaded_grace;static bool has_grace;
+static uint32_t loaded_lock_at;static bool has_lock_at;
 static unsigned history_saves, history_restores;
 esp_err_t book_history_backup_write(FILE *file) {
     ++history_saves;
@@ -59,6 +61,7 @@ esp_err_t book_history_backup_restore(FILE *file) {
     return book_history_backup_validate(file) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
 
+static char loaded_dirs[2][96];
 static bool card_mounted = true;
 static bool commit_fails;
 static int commit_count;
@@ -86,22 +89,47 @@ esp_err_t nvs_flash_erase(void) { return ESP_OK; }
 esp_err_t nvs_open(const char *ns, int mode, nvs_handle_t *h) { (void)ns; (void)mode; *h = 1; return ESP_OK; }
 void nvs_close(nvs_handle_t h) { (void)h; }
 static bool has_tracking,has_para;static uint8_t loaded_tracking,loaded_para;
-esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
-esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u8(nvs_handle_t h, const char *key, uint8_t *value) { (void)h; if(!strcmp(key,NVS_KEY_PIN_GRACE)&&has_grace){*value=loaded_grace;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_PARA)&&has_para){*value=loaded_para;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)&&has_tracking){*value=loaded_tracking;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)&&has_fine){*value=loaded_fine;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOME_COMPONENT)&&loaded_home>=0){*value=(uint8_t)loaded_home;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_AA)&&has_aa){*value=loaded_aa;return ESP_OK;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2)&&keys_v2){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)&&has_weight){*value=loaded_weight;return ESP_OK;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)&&has_adjust){*value=loaded_adjust;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_STYLE)&&loaded_shelf>=0){*value=(uint8_t)loaded_shelf;return ESP_OK;} if(!strcmp(key,NVS_KEY_SHELF_V22)&&loaded_shelf_v22){*value=1;return ESP_OK;} if(!strcmp(key,NVS_KEY_LOCK_STYLE)&&loaded_lock>=0){*value=(uint8_t)loaded_lock;return ESP_OK;} if(!strcmp(key,NVS_KEY_HOLD_ACTION)&&has_hold){*value=loaded_hold;return ESP_OK;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])&&has_keys[i]){*value=loaded_keys[i];return ESP_OK;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH) && has_main_mode) { *value=loaded_main_mode;return ESP_OK; } if (!strcmp(key, "ui_fast")) { *value = test_loaded_fast; return ESP_OK; } if (!strcmp(key, NVS_KEY_SYS_SIZE) && test_loaded_system_size) { *value = test_loaded_system_size; return ESP_OK; } return ESP_FAIL; }
+esp_err_t nvs_set_u8(nvs_handle_t h, const char *key, uint8_t value) { (void)h; if(!strcmp(key,NVS_KEY_PIN_GRACE)){loaded_grace=value;has_grace=true;} if(!strcmp(key,NVS_KEY_BOOK_PARA)){loaded_para=value;has_para=true;} if(!strcmp(key,NVS_KEY_BOOK_TRACK)){loaded_tracking=value;has_tracking=true;} if(!strcmp(key,NVS_KEY_BOOK_WEIGHT_FINE)){loaded_fine=value;has_fine=true;} if(!strcmp(key,NVS_KEY_BOOK_AA)){loaded_aa=value;has_aa=true;} if(!strcmp(key,NVS_KEY_READER_KEYS_V2))keys_v2=value==1; if(!strcmp(key,NVS_KEY_BOOK_WEIGHT)){loaded_weight=value;has_weight=true;} if(!strcmp(key,NVS_KEY_BOOK_INDENT_ADJUST)){loaded_adjust=value;has_adjust=true;} if(!strcmp(key,NVS_KEY_SHELF_STYLE))loaded_shelf=value; if(!strcmp(key,NVS_KEY_SHELF_V22))loaded_shelf_v22=value==1; if(!strcmp(key,NVS_KEY_LOCK_STYLE))loaded_lock=value; if(!strcmp(key,NVS_KEY_HOLD_ACTION)){loaded_hold=value;has_hold=true;} for(unsigned i=0;i<3;++i) if(!strcmp(key,s_reader_key_names[i])){loaded_keys[i]=value;has_keys[i]=true;} if (!strcmp(key, NVS_KEY_MAIN_REFRESH)) {has_main_mode=true;loaded_main_mode=value;} if (!strcmp(key, "ui_fast")) test_loaded_fast=value; return ESP_OK; }
+esp_err_t nvs_get_u32(nvs_handle_t h,const char*key,uint32_t*v){(void)h;if(!strcmp(key,NVS_KEY_PIN_LOCK_AT)&&has_lock_at){*v=loaded_lock_at;return ESP_OK;}return ESP_FAIL;}
+esp_err_t nvs_set_u32(nvs_handle_t h,const char*key,uint32_t v){(void)h;assert(!strcmp(key,NVS_KEY_PIN_LOCK_AT));loaded_lock_at=v;has_lock_at=true;return ESP_OK;}
 esp_err_t nvs_get_str(nvs_handle_t h, const char *key, char *value, size_t *size) {
  (void)h;
  if(!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR)) {
-  const char *legacy="/sdcard/legacy/custom";size_t bytes=strlen(legacy)+1;
+  const char *legacy=loaded_dirs[!strcmp(key,NVS_KEY_FONTS_DIR)];if(!legacy[0])return ESP_FAIL;size_t bytes=strlen(legacy)+1;
   if(*size<bytes)return ESP_FAIL;
   memcpy(value,legacy,bytes);*size=bytes;return ESP_OK;
  }
  return ESP_FAIL;
 }
-esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h; (void)key; (void)value; return ESP_OK; }
+esp_err_t nvs_set_str(nvs_handle_t h, const char *key, const char *value) { (void)h;
+ if((!strcmp(key,NVS_KEY_BOOKS_DIR)||!strcmp(key,NVS_KEY_FONTS_DIR))&&!commit_fails)
+  strlcpy(loaded_dirs[!strcmp(key,NVS_KEY_FONTS_DIR)],value,sizeof(loaded_dirs[0]));
+ return ESP_OK; }
 esp_err_t nvs_erase_key(nvs_handle_t h, const char *key) { (void)h; (void)key; return ESP_OK; }
 esp_err_t nvs_commit(nvs_handle_t h) { (void)h; ++commit_count; return commit_fails ? ESP_FAIL : ESP_OK; }
 
 int main(void) {
+    // 宽限期缺省关闭，档位与32位时刻可重载，坏档位不能沿用旧缓存。/ Default off, persist code/time and reset malformed reloads.
+    app_settings_init();assert(!app_settings_pin_grace_code()&&!app_settings_pin_locked_at());
+    app_settings_set_pin_grace_code(4);app_settings_record_pin_lock(1792886400);
+    app_settings_init();assert(app_settings_pin_grace_minutes()==1440&&app_settings_pin_locked_at()==1792886400);
+    loaded_grace=255;app_settings_init();assert(!app_settings_pin_grace_code());
+    has_grace=has_lock_at=false;app_settings_init();assert(!app_settings_pin_grace_code()&&!app_settings_pin_locked_at());
+    // 自定义目录持久化、非法路径和提交失败；重启读取不能丢掉已经选中的根。
+    // Custom roots survive reload; reject invalid paths and leave the active root intact on failed commits.
+    assert(app_settings_set_books_dir("/sdcard/我的书库"));
+    assert(app_settings_set_fonts_dir("/sdcard/typefaces"));
+    app_settings_init();
+    assert(!strcmp(app_settings_books_dir(),"/sdcard/我的书库")&&!strcmp(app_settings_fonts_dir(),"/sdcard/typefaces"));
+    int commits_before=commit_count;
+    const char *bad[]={"/sdcard","/sdcard/","/sdcard/../fonts","/sdcard/a//b","/flash/fonts","/sdcard/a/./b","/sdcard/a\\b"};
+    for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);++i){assert(!app_settings_set_books_dir(bad[i])&&!app_settings_set_fonts_dir(bad[i]));}
+    assert(commit_count==commits_before);
+    commit_fails=true;assert(!app_settings_set_books_dir("/sdcard/other"));commit_fails=false;
+    assert(!strcmp(app_settings_books_dir(),"/sdcard/我的书库"));
+    assert(app_settings_set_books_dir("/sdcard/books")&&app_settings_set_fonts_dir("/sdcard/fonts"));
+
     loaded_home=3;app_settings_init();assert(app_settings_home_component()==APP_HOME_CLOCK);
     loaded_home=APP_HOME_MOON;app_settings_init();assert(app_settings_home_component()==APP_HOME_MOON);
     loaded_home=-1;keys_v2=false;

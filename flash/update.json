@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc100",
+  "version": "0.3.3-rc102",
   "project": "Read_Pico",
   "board": "RDP-G01-W",
   "layout": "pico-dual-4m-v1",
   "minimum_base_version": "0.3.3-rc72",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc100.bin",
-  "size": 3382896,
-  "sha256": "31e0ed2374a1390b7842600f30e3a42ac709fff63d175c4e835712f8629fd4a5",
-  "notes": "1. 漫画 EPUB 使用有界图片头探测，加快大文件开书\n2. 固定时钟预览与透明书封缓存，改善切换与锁屏\n3. 完善锁屏恢复、字体回退及 TF 生命周期\n4. 官网双机型选择，GitHub 优先 OTA 与交叉签名验证"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Pico-update-0.3.3-rc102.bin",
+  "size": 3467584,
+  "sha256": "ae141d72793eaf319d64bc7b4f8593494ff4aad1c52d63ffb27ce461101a3c03",
+  "notes": "1. 书架切换补8相、其他主页面补6相擦白\n2. 改善列表和阅读水波纹残影\n3. 液态玻璃书架、英文断词对齐\n4. TXT分卷目录、快速选卷\n5. 文件看图可设壁纸或透明书封\n保留设置，rc101可回退。"
 }

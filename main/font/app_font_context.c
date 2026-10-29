@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "esp_log.h"
 #include "settings.h"
 #include "boot_state.h"
 #include "ttf_font.h"

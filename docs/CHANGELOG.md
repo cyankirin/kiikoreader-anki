@@ -1,11 +1,128 @@
 # 版本变更 / Changelog
 
+
+## 0.3.3-rc102.01 / 2026-10-29
+
+- 合并上游 rc102（主页切换擦白、柔和差分翻页、液态玻璃书架、英文连字符与 TXT 目录等），版本升到 rc102.01；Anki 学习页的版面与交互保持不变。
+  Merge upstream rc102 (root whitening on main-page switches, soft differential page turns, the liquid-glass shelf, English hyphenation and TXT tables of contents) and bump the version to rc102.01; the Anki study page keeps its layout and interaction.
+- 修复「学几次 Anki 卡组、回首页锁屏就重启」：导入路径每次数组翻倍都把整张旧表丢掉，1375 张卡的真实卡组每导入一次漏 178,816 字节 PSRAM（宿主计数分配器实测：每轮 +9,856 字节 / +6 块，20 轮共 +187,264 字节；修复后每轮都回到 0）。现在扩容会把旧表还回堆。
+  Fix "the device reboots when locking after studying a deck a few times": the import path abandoned the whole old table every time an array doubled, leaking 178,816 bytes of PSRAM per import of the real 1375-card deck (measured on the host with a counting allocator: +9,856 bytes / +6 blocks per round, +187,264 bytes over 20 rounds; every round now returns to zero live bytes). Growth hands the old table back now.
+- 修复「重启后字体恢复默认且换不动」：异常启动会把系统字体锁在内建字体上，而设置页或文件页选完字体后紧接着的那次激活又把它换回内建，整次开机换字体都没有反应，要再重启一次才恢复。现在显式选择会解除这把锁并立即生效；字体加载失败不再被永久记为「已拒绝」，内存不足时先回收字形缓存再重试一次，失败原因写进日志。
+  Fix "after the reboot the font is back to the default and cannot be changed": an abnormal boot locked the system face to the built-in one, and the activation right after a pick in Settings or on the file page put it back, so changing the font did nothing for the whole boot and only a second reboot restored it. An explicit pick now releases that lock and takes effect immediately; a failed load is no longer remembered as rejected for good; a memory shortfall reclaims the glyph cache and retries once; the failure reason is logged.
+- Anki 页在锁屏前释放整库（电源键锁屏走锁屏钩子），把 PSRAM 让给锁图、帧缓存与深睡交接；逐张进度在评分时已落盘，因此不丢学习进度，解锁后回到卡组列表。选择题字段清洗的 16KB 临时缓冲改走 PSRAM，不再从内部 RAM 取。
+  The Anki page releases the whole deck before locking (a power-key lock goes through the lock hook), handing its PSRAM to the lock art, the frame cache and the deep-sleep handoff; per-card progress was already persisted on every grade, so no study progress is lost and unlocking returns to the deck list. The choice renderer's 16KB field scratch now comes from PSRAM instead of internal RAM.
+- 新增内存水位日志（ERROR 级，串口可见）：进入学习、退出学习、进入锁屏三处打印 PSRAM 剩余、内部 RAM 剩余与 PSRAM 最大连续块，便于现场判断是否内存耗尽。
+  Added memory-watermark logs (ERROR level, visible on the serial console): study enter, study exit and lock enter print free PSRAM, free internal RAM and the largest free PSRAM block, so memory exhaustion can be told apart in the field.
+- 刷机步骤与上一版一致；0.3.3-rc100.02 的固件继续保留，可随时回退。
+  Flashing steps are unchanged; the 0.3.3-rc100.02 firmware stays available for rollback.
+
+
+## 0.3.3-rc102 · 2026-10-29
+
+- 改善主页面切换残影：进入或离开书架补八相擦白，其他主页面补六相；保留灰阶和固定底栏，普通/水波纹合并指示条输出。
+- 阅读水波纹增加四相定稿前擦白，正文与进度同轮输出；普通翻页保留已合并 PR54 的柔和差分方案。
+- 设置列表恢复完整擦白并补八相；框线、分隔线和图标用黑白，文字及头像保留灰阶。
+- 新增液态玻璃书架及加深底板；无保存设置时默认液态玻璃、Moon Clock 与首页强刷，保留已有选择。
+- 改善英文整词换行、基于 TeX 模式的安全连字符与空格对齐；TXT支持按需目录、卷章分组和快速选卷，保持进度/书签偏移。
+- 文件管理看图支持左右切换及壁纸/透明书封菜单，改进书名作者显示与长文件名处理。
+- 保留原 Pico 电源、蓝牙、分区及手动/周期全刷；rc101 原下载与回退入口保留。组合已通过宿主与编译校验，光学效果和速度以实屏为准。
+
+## Pico 0.3.3-rc101 · 2026-10-27
+
+- 导入字体目录上限从24款扩大到128款，系统与阅读共用索引，字体仍按需加载。
+  Expand the shared system/reader font catalogue from24 to128 entries; font faces remain loaded on demand.
+- 设置开关改为黑白轨道，密码提示使用纯白底；设置标题与提示按实际字体对齐。
+  Use monochrome settings switches, a white PIN prompt and ink-aligned settings notices.
+- 新增可选密码免输宽限期，默认关闭；唤醒时重新检查是否过期，冷启动、无效时间及时间回拨仍需验证密码。
+  Add optional PIN grace, off by default, checking expiry on wake while retaining PIN checks on cold boot, invalid time and clock rollback.
+- 兼容部分EPUB在本地ZIP头中写入的空ZIP64占位，解决普通大小的书误报资源过大；保留真实ZIP64限制、资源上限和CRC校验。
+  Accept empty local ZIP64 placeholders in otherwise ordinary EPUB entries; retain real ZIP64 rejection, resource bounds and CRC verification.
+- 补齐第三方许可声明及自动检查；保留Pico独立蓝牙、睡眠、显示波形和分区。Metalio S31仍为rc106。
+  Include attribution checks and preserve Pico-specific Bluetooth, sleep, display waveforms and partitions; Metalio S31 remains on rc106.
+
+
+## Metalio S31 0.3.3-rc106 · 2026-10-27
+
+- 改善锁屏后TF与字体恢复：优先恢复可读卡会话，释放旧句柄后再重开保存的字体；保留异常启动内建字体保护。
+- 修复睡眠恢复时单次异常按键电平可能触发解锁，以及启动门禁前再次复位丢失锁定状态的问题；真实按键、双击与密码验证继续保留。
+- 浅睡十分钟后保持锁屏画面、同步外挂RTC并硬件关机，交接时不重新点亮前光或恢复整套媒体；滑动关机显示已关机提示，充电与拔线边界保留。
+- 壁纸锁屏改为合成完成后一次推屏；文件管理支持较长中文EPUB文件名。
+- 兼容EPUB本地头的全零ZIP64预留字段，修复小书被误报资源超限；真正ZIP64仍不支持，尺寸/范围/CRC校验保留。
+- 正式包使用常规引导程序，支持兼容底包直接OTA/TF升级；十分钟硬件关机后按长按电源键开机使用。未采用本地短按引导实验，未更改原厂波形和分区。
+- 本次仅发布S31；短时USB启动、挂卡和导入系统字体已验证，电池长时间待机、充电与所有字体恢复场景仍需持续实测，不能保证完全杜绝误保护或异常唤醒。保留rc105回退下载。
+
+
+## Metalio S31 0.3.3-rc105 · 2026-10-26
+
+- 同步Pico PR46/47/48/49：设置开关改黑白轨道；密码键盘纯白底、等待和取消保留锁图；新增默认关闭的密码宽限期；设置提示与标题按实测字面对齐并限制长度。S31宽限仅在真实按键浅睡唤醒后判断，硬件重新开机、过期、无效时间或时钟回拨仍验证密码。
+
+- 日常锁屏改为浅睡十分钟后同步外挂PCF8563并硬件关机，不设RTC闹钟；关机前安全关闭书籍、字体及TF，失败保持锁屏并有界重试，配置和进度保留。
+- 合入原厂2.0.66的S31浅睡SDK唤醒修复，补齐MPLL校准和PSRAM时钟交接，保留看门狗与原厂供电顺序；添加有界复位/睡眠阶段诊断。
+- 共享中断需核验真实电源键后才补记解锁，定时及USB唤醒不直接解锁；异常复位禁用开书/导入字体恢复时仍保留已验证记录的锁屏门禁。硬件重新开机单击恢复不再暗中等待第二次按键，双击/密码及异常启动字体保护继续保留；无卡且无活动句柄时也允许浅睡。
+- 修复字体恢复宿主测试的平台选择，保留两机独立覆盖。
+- 本次仅发布S31，Pico版本保持。USB连接下的切页与短时锁屏唤醒已测试；十分钟以上电池待机、关机与续航仍待实机验证，不能保证所有自动解锁反馈均已解决。实测一次TPS屏幕电源启动超时，后续输出恢复，该偶发现象仍在排查；保留rc104回退下载。
+
+
+## Metalio S31 0.3.3-rc104 · 2026-10-25
+
+- 壁纸、透明书封入口共用独立图片浏览器，保持16级灰阶与左右滑动；各入口只允许对应设定，透明书封仅列出PNG。图片切换和设定弹窗取消额外预清屏，统一圆角卡片和底部操作提示。
+- TXT新增UTF‑16大小端流式读取，支持BOM及有明确特征的无BOM文件，处理跨块字符、代理对与坏编码；保留原文件字节进度，自动重建旧索引，UTF‑8/GBK兼容保留。缺少特征的无BOM编码仍可能无法自动判断。
+- 图片增加受控JPEG硬件解码与渐进式JPEG软件回退，保留PNG、内存预算、异常回退和原灰阶合成。
+- TF挂载增加降频、单线兼容与成功档位记忆；解锁优先恢复输入，避免前台长时间等待媒体。设置“升级和恢复”新增“内存卡恢复”，安全释放消费者后异步重挂并重试原字体，不格式化、不清配置；USB读卡、传书和升级占用时禁止重挂。
+- 普通模式书架封面、书夹与外围采用官方裁剪16灰37相，跨主页面切入保留两相擦白；手动、周期全刷与故障恢复保留完整路径。
+- 四主页面切换、书架返回首页下半区，以及离开阅读图片页时，同轮增强变白像素擦除，保持灰黑层次，不增加第二轮输出。其他场景保持原刷新规则。
+- 选择书架拼贴不再在设置页同步预生成，避免阻塞切换主页；实际锁屏沿用缓存生成，首次无缓存仍需等待。
+- 首页底栏按下即震动，当前页也反馈；开书、继续阅读、文件和书架分页、下拉/AI/电源菜单补齐单次反馈。底部三键每次按住只震一次，遵循系统震动开关。
+- AI菜单最后一项恢复“不设功能”，选择后短按不执行动作；取消AI锁屏映射，旧的该选项自动对应为不设功能；保留S31前光、USB、分区、原厂波形及异常启动字体保护。
+
+
+## Metalio S31 0.3.3-rc103 · 2026-10-25
+
+- “关机睡眠”只保留默认“浅睡10分钟后进入深睡”和“彻底断电”，移除单独的锁屏省电方式；旧保留待机选项不再生效。普通锁屏统一先浅睡，保存检查点后进入深睡，USB及密码验证边界继续保留。
+- 浅睡维护按十分钟截止时间缩短最后一段，临时失败退避重试；深睡前暂停字体文件、触摸、屏幕总线及外设电源，交接失败恢复并保持锁屏。续航与完整唤醒流程仍需实机验证。
+
+
+## 未发布 · Pico
+
+- 兼容部分 EPUB 制作工具写入的本地头全零 ZIP64 预留字段，修复小书被误报为资源超限；中央目录、32位尺寸、解压边界和 CRC 校验保持不变，真正的 ZIP64 仍不支持。
+  Accept a narrowly validated zero-filled local ZIP64 placeholder without admitting real ZIP64 archives; central-directory, 32-bit size, inflate-bound and CRC checks stay strict.
+- 启动日志补充恢复保护的具体原因位，区分异常复位、未完成启动、未完成开书和 NVS 写入失败；不放宽保护，也不修改持久化记录格式。
+  Log the concrete recovery reason bits (abnormal reset, unfinished startup, unfinished book open, NVS write failure) without relaxing a protection or changing the persisted format.
+- 系统与阅读字体列表由24款扩展到128款，只增加名称与路径索引，按需加载字库；保留两处选择器的分页和大字号布局。
+  Expand system and reading font catalogues from24 to128 entries using metadata only, retaining on-demand font loading, paging and large-text layouts.
+
+## Metalio S31 0.3.3-rc102 · 2026-10-24
+
+- 正常待机解锁后继续恢复 TF 卡、字体和书籍句柄；临时读卡或内存失败按间隔重试，手动重新加载成功会解除旧失败记录。保留异常启动时使用内建字库的保护，不覆盖用户保存的字体选择。
+- 系统与阅读字体列表上限提高到128款；按实际文件路径区分字体，长标签完整截断UTF-8并区分重名。仅收录TTF/OTF，超过路径容量的文件名会安全缩短，字体内容保持不变；字体上传自动处理不适合存储的名称符号。
+- 系统字号100%–200%时，系统字体页保持四行可翻页列表；字体预览借用临时槽，避免替换正在使用的阅读字库。
+- 文字设置、阅读设置采用局部四灰快刷；打开时统一重建灰色底色，修复字号滑条等位置透出底层正文。进入使用一次26相输出，同面板调节保留16相；故障仍回退完整路径。
+- 图片查看保持完整灰阶，透明书封合成时保持接近不透明的人物区域，减少非透明主体透底。
+- 仅更新Metalio S31，保留前光、振动、USB、分区和原厂波形。编译及针对性宿主回归通过；实际待机恢复与残影改善仍需实机确认，不承诺所有画面均无残影。
+
+
+
+## Metalio S31 0.3.3-rc101 · 2026-10-24
+
+- 下拉菜单与 AI 菜单收回后，恢复底页并进行一次整页清理，替代原来的矩形局部输出，改善边框残影；菜单选项不变，收回时有一次全刷闪动。
+- 图文翻页合并正文与进度输出，保持未变化的像素；黑白变化使用原厂 DU20，中灰变化保留完整 GL48，不降低图片灰阶。
+- 阅读音量上、下键固定为上一页、下一页，不受底部按键自定义影响；修正按键自定义页圆圈键与左键的排列。
+- 保留 S31 独立驱动、前光、振动、设置及分区；Pico 版本保持 rc100。
+
+
 ## 0.3.3-rc100 / 2026-10-24
 
 - 小纸 Pico 与 Metalio EINK 4 Plus 分别构建 rc100，官网按机型提供刷机、TF 下载及联网 OTA；身份和分区保持独立。
 - Pico 同步已确认的漫画图片头测尺寸、时钟样式预览缓存、透明书封缓存及锁屏恢复优化，保留图片质量。
 - 两款联网升级优先 GitHub Pages；启用 SDK 交叉签名证书验证，保留严格 HTTPS、整包校验与回退。
 - 历史固定下载不覆盖。Metalio 源码保持私有，公开交付编译固件与安装工具。
+- Metalio 网页连接改用 Espressif USB JTAG 下载复位，补充握手超时与串口占用提示；首次安装明确要求先恢复 Metalio 官方固件，已有兼容 kiikoread 保留正常更新流程。
+- Metalio 网页读取增加串口接收缓冲与有界在途数据包，收齐并校验读取结束帧；分区核对、应用保留及刷后读回显示进度，读取异常停止并提示重新连接。
+- Metalio 网页下载会话按官方 esptool 的 S31 寄存器与顺序处理 RTC 看门狗及 SWD 自动喂狗，避免连接数秒后复位中断读取或写入；设备正常运行时的看门狗配置保持。
+- Metalio 网页读取进一步收敛为 512 字节单包在途、逐包确认；错误记录具体阶段与已收字节，避免超时后继续接收或确认。新增真实 JS SDK 的碎包、转义跨块及响应/数据粘包回归；浏览器模块绑定同一版本。
+- Metalio 网页读取前补齐本地原生 esptool 的 SPI_SET_PARAMS 初始化：只配置下载程序 RAM 中的容量、块、扇区和页参数，不改 Flash 内容。
+- Metalio 官网改用与本地 esptool 5.5.0 完全相同、固定 SHA-256 的官方 S31 RAM stub；保持一个串口读取任务，SLIP 按线性缓冲解析，串口溢出或断开立即停止会话。
+- 按用户要求取消刷前应用备份与备份下载；仅保留是否清除机内设置的选项，默认保留。连接与身份校验通过后直接刷入，写后由设备计算 MD5 校验，不再通过网页串口读回整份固件。首次分区切换仍须明确勾选清除机内设置，TF 文件保留。
 
 
 ## 0.3.3-rc100.01 / 2026-10-25

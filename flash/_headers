@@ -48,3 +48,11 @@
   Cache-Control: no-cache
 /metalio-flash-core.js
   Cache-Control: no-cache
+/metalio-connection.js
+  Cache-Control: no-cache
+/metalio-flash-reader.js
+  Cache-Control: no-cache
+/metalio-transport.js
+  Cache-Control: no-cache
+/metalio-native-stub.js
+  Cache-Control: no-cache

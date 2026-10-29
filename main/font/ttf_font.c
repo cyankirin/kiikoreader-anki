@@ -15,6 +15,7 @@
  */
 
 #include "ttf_font.h"
+#include "text_glue.h"
 #include "ttf_stroke_filter.h"
 
 #include <dirent.h>
@@ -671,10 +672,12 @@ int ttf_font_scan(void) {
             if (name[0] == '\0' || catalog_has_name(s_catalog, s_catalog_n, name)) {
                 continue;
             }
-            snprintf(
+            int path_len = snprintf(
                 s_catalog[s_catalog_n].path, sizeof(s_catalog[s_catalog_n].path),
                 "%s/%s", font_dir, ent->d_name
             );
+            // 超长路径不能截断后当成另一份字库。/ Never register a truncated path as a different font file.
+            if (path_len < 0 || (size_t)path_len >= sizeof(s_catalog[s_catalog_n].path)) continue;
             strlcpy(s_catalog[s_catalog_n].name, name, sizeof(s_catalog[0].name));
             s_catalog_n++;
         }
@@ -3005,12 +3008,21 @@ void ttf_draw_text_px_fitted(
     ttf_cover_lut_init();
     pixel_height = clamp_px(pixel_height);
     warm_runs(pixel_height, text);
-    int glyph_count = 0, cjk_gaps = 0;
+    int glyph_count = 0, cjk_gaps = 0, space_stretch = 0, space_shrink = 0;
+    bool cjk_text = false;
     const char* cursor = text;
     uint32_t previous = 0;
     while (*cursor) {
+        run_apply((size_t)(cursor - text));
         uint32_t cp = decode_utf8(&cursor);
+        if (cp >= 0x2e80 && cp <= 0xffef) cjk_text = true;
         if (glyph_count && (cjk_spacing_point(previous) || cjk_spacing_point(cp))) ++cjk_gaps;
+        if (cp == ' ' || cp == '\t') {
+            const glyph_entry_t *space = get_glyph(cp, pixel_height);
+            int advance = space ? space->advance_x : 0;
+            space_stretch += text_space_stretch(advance);
+            space_shrink += text_space_shrink(advance);
+        }
         previous = cp;
         ++glyph_count;
     }
@@ -3018,14 +3030,20 @@ void ttf_draw_text_px_fitted(
     int natural = measure_width(pixel_height, text) + tracking_px * gaps;
     int delta = target_width - natural;
     bool compress = delta < 0;
+    // 西文只调整空格；按真实空格宽度分配伸缩，字母和用户字距保持不变。
+    // For Western text, distribute glue by actual space advances without changing letters or user tracking.
+    bool word_justify = !cjk_text;
+    int budget = compress ? space_shrink : space_stretch;
     int adjustable = compress ? gaps : cjk_gaps;
-    if (adjustable < 2 || (compress && -delta > adjustable * 3) ||
-        (!compress && delta > adjustable * 12)) {
+    if ((word_justify && (budget <= 0 || (compress ? -delta > budget : delta > budget * 3))) ||
+        (!word_justify && (adjustable < 2 || (compress ? -delta > adjustable * 3 : delta > adjustable * 12)))) {
         ttf_draw_text_px_spaced(framebuffer, x, y, pixel_height, text, tracking_px, fg, bg);
         return;
     }
-    int quotient = delta / adjustable;
-    int remainder = delta % adjustable;
+    int quotient = word_justify ? 0 : delta / adjustable;
+    int remainder = word_justify ? 0 : delta % adjustable;
+    int64_t used_budget = 0;
+    int distributed = 0;
     int adjusted = 0, cursor_x = x;
     cursor = text;
     while (*cursor) {
@@ -3047,7 +3065,15 @@ void ttf_draw_text_px_fitted(
             const char* peek = cursor;
             uint32_t next = decode_utf8(&peek);
             cursor_x += tracking_px;
-            if (compress || cjk_spacing_point(cp) || cjk_spacing_point(next)) {
+            if (word_justify) {
+                if (cp == ' ' || cp == '\t') {
+                    int advance = glyph ? glyph->advance_x : 0;
+                    used_budget += compress ? text_space_shrink(advance) : text_space_stretch(advance);
+                    int total = (int)((int64_t)delta * used_budget / budget);
+                    cursor_x += total - distributed;
+                    distributed = total;
+                }
+            } else if (compress || cjk_spacing_point(cp) || cjk_spacing_point(next)) {
                 int step = quotient;
                 if (remainder > 0 && adjusted < remainder) ++step;
                 if (remainder < 0 && adjusted < -remainder) --step;

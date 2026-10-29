@@ -12,17 +12,10 @@ typedef enum {
 // Two bounded slots fit Home and enlarged time faces; font-independent bases support cropped motion restores.
 #define UI_HOME_CLOCK_BASE_SLOT_BYTES (504u*460u/2u)
 #define UI_HOME_CLOCK_LIVE_CACHE_BYTES (2u*UI_HOME_CLOCK_BASE_SLOT_BYTES)
-#if KIIKO_BOARD_METALIO47
-// 两槽保留实时底图，另按样式保留固定预览，调用方统一分配PSRAM。
-// Two live bases plus one fixed complete preview per style in the caller-owned PSRAM pool.
-#define UI_HOME_CLOCK_BASE_CACHE_SLOTS (2u+UI_HOME_CLOCK_COUNT)
-#define UI_HOME_CLOCK_PREVIEW_OFFSET (2u*UI_HOME_CLOCK_BASE_SLOT_BYTES)
-#else
 // Pico三槽LRU保留当前与邻近样式；空闲画布借用池前部，不再申请额外整屏。
 // Pico keeps three LRU previews; idle rendering borrows the pool prefix without another full-frame allocation.
 #define UI_HOME_CLOCK_BASE_CACHE_SLOTS 5u
 #define UI_HOME_CLOCK_PREVIEW_OFFSET (1216u*684u/2u)
-#endif
 #define UI_HOME_CLOCK_BASE_CACHE_BYTES (UI_HOME_CLOCK_PREVIEW_OFFSET+(UI_HOME_CLOCK_BASE_CACHE_SLOTS-2u)*UI_HOME_CLOCK_BASE_SLOT_BYTES)
 /// 在绘制外绑定缓冲；绘制过程不分配内存、不读文件。/ Bind outside drawing; rendering never allocates or reads files.
 void ui_home_clock_bind_base_cache(uint8_t *memory,size_t bytes);

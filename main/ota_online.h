@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include "esp_err.h"
 
+#define PICO_OTA_IMAGE_MAX 0x400000
+#define PICO_OTA_PROJECT "Read_Pico"
 #define PICO_OTA_LAYOUT "pico-dual-4m-v1"
 #define PICO_OTA_BOARD "RDP-G01-W"
 #define PICO_OTA_CAPABILITY "PICO_HTTPS_OTA_V1"

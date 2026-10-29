@@ -47,6 +47,10 @@ enum EpdDrawError e0470_update_regions(EpdiyHighlevelState* hl, EpdRect area,
 static const EpdWaveform soft_gray = {4};
 static const EpdWaveform reader_soft = {5};
 const EpdWaveform* display_reader_text_waveform(void) {return &reader_soft;}
+const EpdWaveform* display_reader_water_waveform(void) {return &reader_soft;}
+const EpdWaveform* display_main_clean_waveform_with_phases(const EpdWaveform* w,enum EpdDrawMode mode,unsigned phases){
+    assert(mode==MODE_DU||mode==MODE_GL16);assert(phases==6||phases==8);return w;
+}
 uint8_t app_settings_reader_turn_effect(void){return 0;}
 bool display_reader_fast_text_prepare(EpdiyHighlevelState *hl,EpdRect area){(void)hl;(void)area;assert(false);return false;}
 const EpdWaveform* display_reader_fast_text_waveform(void){assert(false);return &reader_soft;}

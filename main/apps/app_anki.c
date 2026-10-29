@@ -89,6 +89,12 @@ static anki_lists_t* s_lists;
 static anki_view_t s_view = ANKI_VIEW_DECKS;
 static int s_page;                 // 列表分页 / list page
 static bool s_no_font;
+// 锁屏前卸掉会话时置位：卡组列表的计数已过时，等解锁后第一次重绘再重扫。
+// 不在锁屏那一刻重扫——那会把每个 .akd 整份读回内存，正好吃掉刚让出来的空间。
+// / Set when the session is dropped before locking: the list counts are stale,
+// so rescan on the first repaint after unlocking. Never rescan at lock time —
+// that reads every .akd back into memory and eats the room just freed.
+static bool s_rescan_pending;
 static char s_message[96];
 // 会话状态（含两块 16KB 卡面缓冲）常驻 PSRAM，避免占内部 RAM。
 // Session state (with two 16KB card buffers) stays in PSRAM, off internal RAM.
@@ -465,6 +471,15 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
     switch (s_view) {
         case ANKI_VIEW_DECKS:
         case ANKI_VIEW_FILES: {
+            // 解锁后的第一次重绘补齐锁屏前跳过的重扫：此时整库已经还给堆，
+            // 重新读卡组文件不会和锁屏路径抢内存。
+            // The first repaint after unlocking catches up on the rescan that
+            // was skipped before locking: the deck is back on the heap by now,
+            // so re-reading deck files cannot compete with the lock path.
+            if (s_rescan_pending) {
+                s_rescan_pending = false;
+                if (s_view == ANKI_VIEW_DECKS) scan_decks();
+            }
             bool decks = s_view == ANKI_VIEW_DECKS;
             int total = decks ? (lists_ready() ? s_lists->deck_count : 0)
                               : (lists_ready() ? s_lists->file_count : 0);
@@ -640,7 +655,9 @@ static void anki_on_exit(app_ctx_t* ctx) {
 static void anki_before_lock(app_ctx_t* ctx) {
     (void)ctx;
     anki_heap_log("anki lock enter");
+    bool had_session = s_session != NULL && s_session->active;
     session_release();
+    if (had_session) s_rescan_pending = true;
     anki_heap_log("anki lock released");
 }
 

@@ -39,6 +39,8 @@
 #define NVS_KEY_SLEEP "sleep"
 #define NVS_KEY_SHUTDOWN_MODE "shutdown"
 #define NVS_KEY_WAKE_PRESSES "wake_press"
+#define NVS_KEY_PIN_GRACE "pin_grace"
+#define NVS_KEY_PIN_LOCK_AT "pin_lck_at"
 #define NVS_KEY_HOME_FULL "home_full"
 #define NVS_KEY_HOME_COMPONENT "home_widget"
 #define NVS_KEY_HOME_GOAL "home_goal"
@@ -93,8 +95,10 @@
 static app_sleep_mode_t s_sleep = APP_SLEEP_DEEP;
 static bool s_staged_shutdown;
 static uint8_t s_wake_presses = 1;
-static bool s_home_full_refresh;
-static app_home_component_t s_home_component = APP_HOME_FOLDER;
+static uint8_t s_pin_grace_code_v;  // 0-4 档位码，NVS 存码不存分钟 / 0-4 step code, NVS stores the code not minutes
+static uint32_t s_pin_locked_at;    // 最近一次带密码锁屏的 unix 秒 / last PIN-enabled lock, unix seconds
+static bool s_home_full_refresh = true;
+static app_home_component_t s_home_component = APP_HOME_MOON;
 static uint8_t s_home_goal_minutes = 30;
 static app_main_refresh_mode_t s_main_refresh;
 static char s_device_name[64] = "kiikoread";
@@ -140,10 +144,11 @@ static uint8_t s_book_tracking = -APP_BOOK_TRACK_MIN, s_book_reading_line, s_boo
 static uint8_t s_book_indent = 2;
 static uint8_t s_book_indent_adjust = 20;
 static uint8_t s_auto_lock_minutes;
-static uint8_t s_shelf_style = 2;
+static uint8_t s_shelf_style = 6;
 static char s_books_dir[MEDIA_DIR_MAX] = "/sdcard/books";
 static char s_fonts_dir[MEDIA_DIR_MAX] = "/sdcard/fonts";
 static void nvs_put_u8(const char* key, uint8_t value);
+static void nvs_put_u32(const char* key, uint32_t value);
 
 static bool valid_media_dir(const char* path) {
     if (!path || strncmp(path, "/sdcard/", 8) || !path[8] ||
@@ -180,6 +185,11 @@ static uint8_t valid_book_px(uint8_t px) {
 }
 
 void app_settings_init(void) {
+    // 缺省与读取失败采用新默认，随后仅由有效的已保存选择覆盖。
+    // Use current defaults on missing/failed reads, then apply valid saved preferences.
+    s_home_full_refresh = true;
+    s_home_component = APP_HOME_MOON;
+    s_shelf_style = 6;
     esp_err_t err = nvs_flash_init();
     // 设置分区异常时保留原数据供恢复，绝不因空间不足自动擦除用户资料。
     // Preserve settings on NVS errors; a full partition must never silently erase profile data.
@@ -201,10 +211,18 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_WAKE_PRESSES, &raw) != ESP_OK || (raw != 1 && raw != 2)) raw = 1;
     s_wake_presses = raw;
     raw = 0;
-    if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK) s_home_full_refresh = raw == 1;
+    s_pin_grace_code_v = 0;
+    if (nvs_get_u8(h, NVS_KEY_PIN_GRACE, &raw) == ESP_OK && raw <= 4) s_pin_grace_code_v = raw;
+    s_pin_locked_at = 0;
+    {
+        uint32_t locked_at = 0;
+        if (nvs_get_u32(h, NVS_KEY_PIN_LOCK_AT, &locked_at) == ESP_OK) s_pin_locked_at = locked_at;
+    }
+    raw = 1;
+    if (nvs_get_u8(h, NVS_KEY_HOME_FULL, &raw) == ESP_OK && raw <= 1) s_home_full_refresh = raw == 1;
     raw = 0;
     s_home_component = nvs_get_u8(h, NVS_KEY_HOME_COMPONENT, &raw) == ESP_OK && raw < APP_HOME_COMPONENT_COUNT
-        ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_FOLDER;
+        ? (raw == 3 ? APP_HOME_CLOCK : (app_home_component_t)raw) : APP_HOME_MOON;
     raw = 30;
     s_home_goal_minutes = nvs_get_u8(h, NVS_KEY_HOME_GOAL, &raw) == ESP_OK && raw >= 5 && raw <= 180 && raw % 5 == 0 ? raw : 30;
     raw = 0;
@@ -334,18 +352,18 @@ void app_settings_init(void) {
     if (nvs_get_u8(h, NVS_KEY_BOOK_PARA, &para) == ESP_OK && app_settings_book_paragraph_value(app_settings_book_paragraph_level(para)) == para) s_book_para = para;
     if (nvs_get_u8(h, NVS_KEY_BOOK_MARGIN, &margin) == ESP_OK && margin <= 60)
         s_book_margin = margin > 48 ? 48 : margin;
-    uint8_t shelf_style = 2;
-    if (nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 5)
-        s_shelf_style = shelf_style == 3 || shelf_style == 4 ? 2 : shelf_style;
+    uint8_t shelf_style = 6;
+    const bool saved_shelf = nvs_get_u8(h, NVS_KEY_SHELF_STYLE, &shelf_style) == ESP_OK && shelf_style >= 1 && shelf_style <= 6;
+    if (saved_shelf) s_shelf_style = shelf_style == 3 || shelf_style == 4 ? 2 : shelf_style;
     uint8_t shelf_v22 = 0;
     bool migrate_shelf = nvs_get_u8(h, NVS_KEY_SHELF_V22, &shelf_v22) != ESP_OK || shelf_v22 != 1;
-    bool retired_shelf = shelf_style == 3 || shelf_style == 4;
-    if (migrate_shelf) s_shelf_style = 2;
+    bool retired_shelf = saved_shelf && (shelf_style == 3 || shelf_style == 4);
     // 固定媒体根目录；忽略旧版自定义目录键。/ Fixed media roots ignore retired custom-directory keys.
     nvs_close(h);
     if ((migrate_shelf || retired_shelf) && nvs_open(NVS_NS, NVS_READWRITE, &h) == ESP_OK) {
-        // 首次刷入此版只切换书架外观；随后尊重用户手动选择。/ Set acrylic once on upgrade, then preserve manual choices.
-        esp_err_t saved = nvs_set_u8(h, NVS_KEY_SHELF_STYLE, 2);
+        // 旧标记只补齐迁移记录，不覆盖有效样式；无配置时持久保存液态玻璃默认。
+        // Complete the legacy marker without overriding valid choices; persist liquid glass for an unconfigured shelf.
+        esp_err_t saved = nvs_set_u8(h, NVS_KEY_SHELF_STYLE, s_shelf_style);
         if (saved == ESP_OK) saved = nvs_set_u8(h, NVS_KEY_SHELF_V22, 1);
         if (saved == ESP_OK) (void)nvs_commit(h);
         nvs_close(h);
@@ -402,6 +420,27 @@ void app_settings_set_wake_presses(uint8_t presses) {
     if (presses == s_wake_presses) return;
     s_wake_presses = presses;
     nvs_put_u8(NVS_KEY_WAKE_PRESSES, presses);
+}
+// 密码宽限期：档位码存储避免分钟值超出 u8；480/1440 装不进去。
+// PIN grace: the step code avoids minute values that no longer fit a u8.
+uint8_t app_settings_pin_grace_code(void) { return s_pin_grace_code_v; }
+void app_settings_set_pin_grace_code(uint8_t code) {
+    if (code > 4) code = 0;
+    if (code == s_pin_grace_code_v) return;
+    s_pin_grace_code_v = code;
+    nvs_put_u8(NVS_KEY_PIN_GRACE, code);
+}
+unsigned app_settings_pin_grace_minutes(void) {
+    static const unsigned minutes[5] = {0, 5, 60, 480, 1440};
+    return s_pin_grace_code_v < 5 ? minutes[s_pin_grace_code_v] : 0;
+}
+uint32_t app_settings_pin_locked_at(void) { return s_pin_locked_at; }
+void app_settings_record_pin_lock(uint32_t unix_seconds) {
+    // 时钟无效不记录，判定端安全回落要密码。/ An invalid clock records nothing; the check falls back to the PIN.
+    if (unix_seconds < 1704067200) return;
+    if (unix_seconds == s_pin_locked_at) return;
+    s_pin_locked_at = unix_seconds;
+    nvs_put_u32(NVS_KEY_PIN_LOCK_AT, unix_seconds);
 }
 
 app_home_component_t app_settings_home_component(void) { return s_home_component; }
@@ -540,6 +579,14 @@ static void nvs_put_u8(const char* key, uint8_t value) {
     nvs_handle_t h;
     if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
     nvs_set_u8(h, key, value);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static void nvs_put_u32(const char* key, uint32_t value) {
+    nvs_handle_t h;
+    if (nvs_open(NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, key, value);
     nvs_commit(h);
     nvs_close(h);
 }
@@ -820,7 +867,7 @@ void app_settings_set_book_paragraph_spacing(uint8_t percent) {
 }
 uint8_t app_settings_shelf_style(void) { return s_shelf_style; }
 void app_settings_set_shelf_style(uint8_t style) {
-    if (style < 1 || style > 5) return;
+    if (style < 1 || style > 6) return;
     if (style == 3 || style == 4) style = 2;
     if (s_shelf_style == style) return;
     s_shelf_style = style;
@@ -1155,7 +1202,7 @@ static bool backup_valid(const settings_backup_v1_t *backup) {
         (backup_version(backup)>=20 ?
          app_settings_book_paragraph_value(app_settings_book_paragraph_level(f[BK_PARAGRAPH])) != f[BK_PARAGRAPH] :
          f[BK_PARAGRAPH] > 75 || f[BK_PARAGRAPH] % 25) ||
-        f[BK_SHELF] < 1 || f[BK_SHELF] > 5) return false;
+        f[BK_SHELF] < 1 || f[BK_SHELF] > 6) return false;
     if (strnlen(backup->books_dir, sizeof(backup->books_dir)) == sizeof(backup->books_dir) ||
         strnlen(backup->fonts_dir, sizeof(backup->fonts_dir)) == sizeof(backup->fonts_dir)) return false;
     return backup_path_valid(backup->font, sizeof(backup->font)) &&

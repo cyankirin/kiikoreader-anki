@@ -14,9 +14,20 @@ jobs:
       - name: Water-turn, display recovery, navigation and waveform regressions
         shell: bash
         run: |
+          python3 tools/license_notices_host_test.py
+          python3 tools/test_book_epub.py
+          python3 tools/test_zip_reader.py
+          python3 tools/font_picker_catalog_host_test.py
+          python3 tools/font_catalog_host_test.py
           bash tools/run_water_turn_host_test.sh
           bash tools/run_display_host_test.sh
           bash tools/run_display_navigation_tests.sh
+          python3 tools/pico_main_clean_host_test.py
+          python3 tools/english_hyphen_host_test.py
+          python3 tools/txt_navigation_host_test.py
+          python3 tools/txt_volume_host_test.py
+          python3 tools/liquid_shelf_style_host_test.py
+          python3 tools/image_page_host_test.py
           python3 tools/pmic_gate_host_test.py
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
@@ -33,6 +44,9 @@ jobs:
           python3 tools/reader_spacing_host_test.py
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs
+          node tools/metalio_connection_host_test.mjs
+          node tools/metalio_reader_host_test.mjs
+          node tools/metalio_transport_host_test.mjs
           python3 tools/tls_bundle_host_test.py
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py

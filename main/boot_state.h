@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "esp_err.h"
+#include "kiiko_board_config.h"
 
 #define PICO_BOOT_PATH_MAX 288
 typedef struct {

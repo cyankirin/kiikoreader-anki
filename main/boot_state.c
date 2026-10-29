@@ -24,6 +24,15 @@ typedef struct {
 static boot_record_t s_record;
 static pico_resume_t s_resume;
 static bool s_recovery, s_resume_pending, s_writable, s_interrupted, s_resume_frame;
+// 原因仅用于诊断；保留所有既有保护与兼容记录格式。/ Diagnostic causes only; retain every protection and the persisted format.
+enum {
+    BOOT_RECOVERY_RESET = 1u,
+    BOOT_RECOVERY_RECORD = 2u,
+    BOOT_RECOVERY_STARTING = 4u,
+    BOOT_RECOVERY_OPENING = 8u,
+    BOOT_RECOVERY_STORE = 16u,
+};
+static unsigned s_recovery_reasons;
 typedef struct {
     uint32_t magic;
     uint16_t lengths[3];
@@ -127,6 +136,7 @@ void pico_boot_init(bool abnormal_reset) {
     s_resume_frame = false;
     s_interrupted = false;
     s_recovery = abnormal_reset;
+    s_recovery_reasons = abnormal_reset ? BOOT_RECOVERY_RESET : 0;
     nvs_handle_t h;
     esp_err_t err = nvs_open(KIIKO_BOARD_STARTUP_NAMESPACE, NVS_READWRITE, &h);
     s_writable = err == ESP_OK;
@@ -143,10 +153,16 @@ void pico_boot_init(bool abnormal_reset) {
             path_valid(s_record.blocked, true) && s_record.checksum == checksum(&s_record);
         }
         if (!valid) {
-            if (err != ESP_ERR_NVS_NOT_FOUND) s_recovery = true;
+            if (err != ESP_ERR_NVS_NOT_FOUND) {
+                s_recovery = true;
+                s_recovery_reasons |= BOOT_RECOVERY_RECORD;
+            }
             memset(&s_record, 0, sizeof(s_record));
         }
-    } else s_recovery = true;
+    } else {
+        s_recovery = true;
+        s_recovery_reasons |= BOOT_RECOVERY_RECORD;
+    }
     // 其他版本的缓存清单仍留在卡上，只移除不被本地阅读器支持的恢复/隔离入口。
     // Retain other editions' cache files; remove only resume/quarantine entries unsupported by the local reader.
     if(s_record.resume.reader&&!book_file_path_supported(s_record.resume.path)){
@@ -155,6 +171,8 @@ void pico_boot_init(bool abnormal_reset) {
     if(s_record.opening[0]&&!book_file_path_supported(s_record.opening))s_record.opening[0]=0;
     if(s_record.blocked[0]&&!book_file_path_supported(s_record.blocked))s_record.blocked[0]=0;
     if (s_record.starting || s_record.opening[0]) s_recovery = true;
+    if (s_record.starting) s_recovery_reasons |= BOOT_RECOVERY_STARTING;
+    if (s_record.opening[0]) s_recovery_reasons |= BOOT_RECOVERY_OPENING;
     if (s_record.opening[0]) {
         s_interrupted = true;
         memcpy(s_record.blocked, s_record.opening, sizeof(s_record.blocked));
@@ -169,8 +187,12 @@ void pico_boot_init(bool abnormal_reset) {
     s_record.starting = 1;
     s_record.resume_valid = 0;
     s_record.reserved[0] = 0;
-    if (store() != ESP_OK) { s_resume_pending = false; s_recovery = true; }
-    ESP_LOGI("boot_state", "startup recovery=%d resume=%d", s_recovery, s_resume_pending);
+    if (store() != ESP_OK) {
+        s_resume_pending = false;
+        s_recovery = true;
+        s_recovery_reasons |= BOOT_RECOVERY_STORE;
+    }
+    ESP_LOGI("boot_state", "startup recovery=%d resume=%d reasons=0x%02x", s_recovery, s_resume_pending, s_recovery_reasons);
 }
 void pico_boot_ready(void) {
     s_record.starting = 0;

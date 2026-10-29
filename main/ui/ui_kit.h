@@ -101,6 +101,9 @@ extern "C" {
 /// 在现有画面上绘制半透明、轻度模糊的灰阶挡板。/ Draw a translucent, softly blurred grayscale guard over the existing image.
 void ui_draw_acrylic_guard(uint8_t *framebuffer, EpdRect rect);
 void ui_draw_frosted_pocket(uint8_t *framebuffer, EpdRect rect);
+/// 薄玻璃挡条及层板，仅在给定矩形内取样和绘制；不修改封面主体、不推屏。
+/// Thin glass rail and shelf edge, sampling/painting only inside rect; never alter cover bodies or present.
+void ui_draw_liquid_shelf_rail(uint8_t *framebuffer, EpdRect rect);
 
 /// 文字按「行的上沿」定位，基线由字号推出，调用处不用再算 ascender。
 /// Text is placed by the top of the line; the baseline comes from the size so callers skip the ascender.
@@ -131,6 +134,9 @@ void ui_text(
 );
 /// Draw UI metadata at the exact requested size, independent of the global UI-size preference.
 /// 按指定像素字号绘制系统信息，不受全局系统字号设置影响。
+/// 当前UI文字字面范围及视觉中心。/ Current UI face ink extents and centre.
+void ui_text_line_span_px(int px,const char *text,int *above,int *below);
+int ui_text_ink_center_y(int y_top,int px,const char *text);
 void ui_text_fixed(
     uint8_t* framebuffer, int x, int y_top, int px, const char* text,
     enum EpdFontFlags align, bool inverted
@@ -159,6 +165,8 @@ void ui_text_fixed_context_aa_vc(uint8_t *fb,int x,int center_y,int px,const cha
 /// 标题复用当前活动字体并按固定字号截短：首页系统字体、阅读页阅读字体；不加载第二份字体。
 /// Fit titles in the active face at a fixed size: Home's system face or the reader face, without loading a second font.
 int ui_text_title_fit(char *text, int preferred_px, int width, const char *font_sample);
+/// Measure with exactly the face selected by title drawing, without altering the title.
+int ui_text_title_width_px(int px, const char *text, const char *font_sample);
 /// 当前页字体按目标字号直接绘制灰阶抗锯齿标题，视觉中心对齐，不受系统字号缩放影响。
 /// Rasterize the active face directly with gray antialiasing at the target size, visually centered and independent of UI scaling.
 void ui_text_title_vc(uint8_t *fb, int x, int center_y, int px, const char *text,

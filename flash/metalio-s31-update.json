@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "version": "0.3.3-rc100",
+  "version": "0.3.3-rc106",
   "project": "Kiikoread_Metalio_S31",
   "board": "Metalio-EINK4-Plus-S31",
   "layout": "metalio-s31-dual-5m-v1",
   "minimum_base_version": "0.3.3-rc98",
-  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc100.bin",
-  "size": 4498208,
-  "sha256": "a2f0ba9ea7235e9433dad8d8de8e2eeb8e5e17fbeabf2ea7c5b6472f3da80df5",
-  "notes": "1. Metalio S31 升级至 rc100，独立身份与双槽保留\n2. GitHub 优先、官网备用，启用 SDK 交叉签名校验\n3. HTTPS、整包校验、取消与续传，保留设置及 TF 文件"
+  "url": "https://wegooo-cell.github.io/read-pico-reader/Metalio-S31-update-0.3.3-rc106.bin",
+  "size": 4735072,
+  "sha256": "e27116c2990b41f2769cbb98729047b9207ff686decd7c263e1ff85922922ac7",
+  "notes": "1. 锁屏唤醒门禁与媒体/字体恢复修复\n2. 关机前光与充电边界修复\n3. 长文件名及EPUB封装兼容\n仅Metalio S31，保留数据。硬件关机后长按开机；长待机仍待实测。"
 }

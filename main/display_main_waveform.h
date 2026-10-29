@@ -17,12 +17,24 @@ const EpdWaveform* display_main_bw_waveform(void);
 /// Ordinary gray-edge interleaving keeps endpoints/phase counts/pulse counts; OOM falls back to original soft grays.
 const EpdWaveform* display_main_normal_waveform(void);
 
+/// 板级根页清残影：保留原动作并补变白及释放，分配失败回退原表；各板使用各自相位预算。
+/// Board root cleanup retains original actions and adds white/release phases within each board's own budget, with safe allocation fallback.
+const EpdWaveform* display_main_clean_waveform(const EpdWaveform* source, enum EpdDrawMode mode);
+
+#if !KIIKO_BOARD_METALIO47
+/// Pico根页按来源/目标选择六或八相变白；缓存区分力度且不叠加，分配失败保留原表。
+/// Pico roots select six/eight changed-white phases; strength-keyed bounded caches never stack; OOM retains the source.
+const EpdWaveform* display_main_clean_waveform_with_phases(
+    const EpdWaveform* source, enum EpdDrawMode mode, unsigned white_phases
+);
+#endif
+
 /// 书架封面/材质保留校准灰阶，白色留白只向白推动；只供普通切页，手动全刷保留原表。
 /// Shelf art keeps calibrated grays while white space drives only white; ordinary transitions only, preserving vendor manual full refresh.
 const EpdWaveform* display_main_shelf_waveform(enum EpdDrawMode mode);
 
-/// 设置列表滚动保留抗锯齿灰阶，变白使用原DU擦除，不叠加书架的四相补白；低内存回退现有柔和表。
-/// Settings scrolling retains AA grays with native DU whitening, omitting the shelf's four extra white phases; low memory keeps the existing soft table.
+/// 设置滚动使用已有八相灰阶差分，只向目标推动；不二值化字缘，不申请额外波形内存。
+/// Board-owned settings scrolling retains glyph grays; Pico local uses native37 plus eight changed-white phases (45 total).
 const EpdWaveform* display_settings_scroll_waveform(void);
 /// 系统底色恢复原完整柔和灰阶，白底同向擦除；底栏由调用方裁剪保护，不改原始波形。
 /// Restore complete original soft system grays with directional white erasure; callers crop navigation and vendor tables remain intact.

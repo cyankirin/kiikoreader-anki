@@ -6,6 +6,7 @@
 #include "ui_wallpaper.h"
 #include "book_store.h"
 #include "read_pico_sd.h"
+
 #include <stdlib.h>
 #include <string.h>
 #include "esp_heap_caps.h"

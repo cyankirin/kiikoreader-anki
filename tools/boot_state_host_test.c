@@ -55,7 +55,7 @@ static void seed_legacy(boot_record_t record) {
 int main(void) {
     pico_resume_t resume = {.tab=1, .reader=1, .fullscreen=1, .path="/sdcard/books/deep.epub"}, out;
     char interrupted[PICO_BOOT_PATH_MAX];
-    pico_boot_init(false); assert(!pico_boot_recovery() && !pico_boot_take_resume(&out));
+    pico_boot_init(false); assert(!pico_boot_recovery() && !pico_boot_take_resume(&out) && !s_recovery_reasons);
     pico_boot_ready();
     assert(pico_boot_save_resume(&resume) == ESP_OK);
     pico_boot_init(false);
@@ -65,6 +65,7 @@ int main(void) {
     // 恢复过程中又复位，入口已消费且启动未完成，回到保护模式。
     // Reset again while resuming: consumption and incomplete startup prevent a loop.
     pico_boot_init(false); assert(pico_boot_recovery() && !pico_boot_take_resume(&out));
+    assert(s_recovery_reasons==BOOT_RECOVERY_STARTING);
     pico_boot_ready(); pico_boot_init(false); assert(!pico_boot_recovery()); pico_boot_ready();
     // 密码取消/深睡再次开机不能丢失恢复，但实际开书前必须消费。
     // PIN cancellation and another deep boot retain resume; actual opening still consumes it.
@@ -76,6 +77,7 @@ int main(void) {
     fail_commit=true; assert(!pico_boot_take_resume(&out)); fail_commit=false; pico_boot_clear_resume();
     assert(pico_boot_book_begin("/sdcard/books/large.epub") == ESP_OK);
     pico_boot_init(false); assert(pico_boot_recovery());
+    assert(s_recovery_reasons==BOOT_RECOVERY_OPENING);
     assert(pico_boot_interrupted_book(interrupted, sizeof(interrupted)) && !strcmp(interrupted, "/sdcard/books/large.epub"));
     assert(!pico_boot_interrupted_book(interrupted, 8));
     pico_boot_ready(); pico_boot_init(false); pico_boot_ready();

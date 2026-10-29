@@ -21,8 +21,12 @@ with tempfile.TemporaryDirectory() as folder:
 #include <sys/stat.h>
 #include <setjmp.h>
 #include <errno.h>
+#include <time.h>
 #include "ui_pinpad.h"
 #define FRAME_BYTES (684u*1216u/2u)
+#define UI_LOCK_WIDTH 684
+#define UI_LOCK_HEIGHT 1216
+#define UI_GRAY_WHITE 255
 #define PAD_W 684
 #define PAD_H 1216
 #define LOW_W 76
@@ -64,6 +68,17 @@ static int fat_rename(const char *a,const char *b){
 static unsigned stage,idx,waits,verified,ready,held,pushes,fulls,wiped,stops,entries,settles;
 static bool enabled_storage=true,valid_storage=true,low_memory,boot_scenario,timeout_scenario,display_failure;
 static uint64_t now;
+static uint64_t slept_ms;
+static uint32_t locked_at=1792886400,wall_unix=1792886400,wake_delay;
+static uint8_t s_pin_grace_code_v;
+static bool boot_resume;
+typedef struct{bool time_synced;uint32_t unix_sec;}pmu_snapshot_t;
+static const pmu_snapshot_t*read_pico_pmu_get(void){return NULL;}
+static time_t grace_time(time_t*p){time_t v=(time_t)wall_unix+now/1000;if(p)*p=v;return v;}
+#define time grace_time
+static uint32_t app_settings_pin_locked_at(void){return locked_at;}
+static bool pico_boot_has_resume(void){return boot_resume;}
+
 static int power_pending;
 static jmp_buf deep;
 static struct {int x,y,count,error;} samples[128];static unsigned sample_count;
@@ -77,12 +92,14 @@ static bool lock_pin_verify(const char pin[5]){++verified;return valid_storage&&
 static uint8_t *epd_hl_get_framebuffer(EpdiyHighlevelState *h){(void)h;return framebuffer;}
 enum EpdRotation epd_get_rotation(void){return 1;}
 static void epd_poweron(void){}
+void ui_fill_rect_fast(EpdRect r,int gray,uint8_t*fb){assert(r.x==0&&r.y==0&&r.width==684&&r.height==1216);memset(fb,gray,FRAME_BYTES);}
+
 static void epd_poweroff(void){}
 static void ui_lock_fallback_draw(uint8_t *fb){memset(fb,255,FRAME_BYTES);fb[FRAME_BYTES/2]=0;}
 static size_t heap_caps_get_free_size(int caps){(void)caps;return low_memory?1024*1024:8*1024*1024;}
 static void *heap_caps_malloc(size_t n,int caps){(void)caps;return malloc(n);}
 static void app_lock_wait_key_idle(int ms){(void)ms;}
-static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc);assert(ms==600000);++waits;return timeout_scenario?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
+static int app_light_sleep_wait_timed(void *acc,unsigned ms){assert(!acc);assert(ms==600000);++waits;now+=wake_delay;slept_ms+=wake_delay;return timeout_scenario?APP_WAKE_TIMEOUT:APP_WAKE_KEY;}
 static void app_enter_host_sleep(int mode){assert(mode==APP_SLEEP_DEEP);longjmp(deep,1);}
 static int64_t esp_timer_get_time(void){return now*1000;}
 static int read_pico_pmu_poll(void){return 0;}
@@ -94,7 +111,7 @@ static bool ble_pt_pop_raw(ble_pt_raw_t *e){(void)e;return false;}
 static void pico_boot_ready(void){++ready;}
 static void pico_boot_hold_resume(void){++held;}
 static int cst836u_read(void *tp,cst836u_touch_t *t){(void)tp;if(idx>=sample_count){*t=(cst836u_touch_t){0};return 0;}typeof(samples[0]) s=samples[idx++];*t=(cst836u_touch_t){.touched=s.count!=0,.count=s.count,.x=s.x,.y=s.y};if(s.error<-1){power_pending=-s.error;return ESP_OK;}return s.error;}
-static void vTaskDelay(int ms){now+=ms;assert(now<35000||timeout_scenario||!valid_storage);}
+static void vTaskDelay(int ms){now+=ms;assert(now-slept_ms<35000||timeout_scenario||!valid_storage);}
 static void ui_pinpad_begin(ui_pinpad_t *p,const uint8_t *fb,const char *title){(void)fb;ui_pinpad_end(p);ui_pinpad_reset(p,title,"");if(!low_memory)p->background=malloc(1);}
 static void ui_pinpad_paint_input(uint8_t *f,ui_pinpad_t *p){(void)p;f[0]=0xaa;}
 static void ui_pinpad_paint(uint8_t *fb,const ui_pinpad_t *p,EpdRect area){(void)p;if(area.y==470)++settles;if(area.y==0&&area.height==1216)++entries;fb[0]=0xaa;}
@@ -104,6 +121,8 @@ static enum EpdDrawError update_display_area_diff_with(void *h,const int *w,int 
 static enum EpdDrawError update_display_full(void *h){(void)h;++fulls;return EPD_GOOD;}
 static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)result;}
 '''.replace('FOLDER',str(p))
+ unit+=function('app_settings_pin_grace_minutes',ROOT/'main/settings.c')+'\n'
+ unit+=function('lock_pin_grace_active',ROOT/'main/sleep.c')+'\n'
  # Declarations precede the backdrop stub; state/hit logic comes from the production pad.
  unit=unit.replace('static void ui_pinpad_paint_input(', 'void ui_pinpad_paint_input(').replace('static void ui_pinpad_begin(', 'void ui_pinpad_begin(').replace('static void ui_pinpad_paint(', 'void ui_pinpad_paint(')
  for n in ('ui_pinpad_full','ui_pinpad_entry_area','ui_pinpad_end','ui_pinpad_reset','key_rect','joined','hit_test','ui_pinpad_handle'):
@@ -111,7 +130,7 @@ static void guard_draw_result(void *h,enum EpdDrawError result){(void)h;(void)re
  for n in ('checksum','wallpaper_key','lock_screen_restore','lock_screen_save','restore_art','present','present_input','lock_screen_authenticate'):
   unit+=function(n,ROOT/'main/lock_screen.c')+'\n'
  unit+=r'''
-static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);lock_screen_save(framebuffer);}
+static void start(void){idx=sample_count=waits=verified=ready=held=pushes=fulls=entries=settles=0;now=slept_ms=0;wake_delay=0;power_pending=0;memset(framebuffer,0x37,sizeof(framebuffer));add(0,0,0,0);lock_screen_save(framebuffer);}
 int main(void){
  EpdiyHighlevelState hl={0};
  // FAT覆盖与提交失败必须保持有效旧图。/ FAT replacement and failed commits must preserve valid old art.
@@ -130,6 +149,23 @@ int main(void){
  start();enabled_storage=true;valid_storage=false;
  lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(!verified&&!entries&&!pushes&&!waits&&!ready&&!held);
  start();valid_storage=true;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&entries==1);
+
+ // 实际等待跨过5分钟后必须当次提示密码，不再要求第二次电源键；冷启动不免密。
+ // Crossing five minutes prompts on the same wake without a second key; cold starts never use grace.
+ const unsigned grace_values[]={0,5,60,480,1440};
+ for(unsigned code=0;code<5;++code){s_pin_grace_code_v=code;assert(app_settings_pin_grace_minutes()==grace_values[code]);}
+ s_pin_grace_code_v=5;assert(!app_settings_pin_grace_minutes());s_pin_grace_code_v=1;
+ const uint32_t waits_ms[]={0,299000,300000,360000,599000};
+ for(unsigned i=0;i<sizeof(waits_ms)/sizeof(waits_ms[0]);++i){
+  start();wake_delay=waits_ms[i];correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);
+  assert(waits==1);assert(verified==(waits_ms[i]>=300000));assert(entries==verified);
+ }
+ start();boot_resume=false;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1);
+ start();boot_resume=true;wake_delay=299000;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(!verified&&waits==1&&!entries);
+ start();boot_resume=true;wake_delay=360000;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,true);assert(verified==1&&waits==1&&entries==1&&ready==1&&held==1);
+ start();wall_unix=0;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1);
+ start();wall_unix=locked_at-60;correct();lock_screen_authenticate(&hl,(void*)1,(void*)2,false);assert(verified==1);
+ wall_unix=locked_at;boot_resume=false;s_pin_grace_code_v=0;
  // Wrong PIN, cancel, pickup, physical touch buttons, multitouch and read errors, then valid PIN.
  start();for(int i=0;i<4;++i)tap(342,1021);tap(144,1132);add(0,0,0,0);
  tap(342,1350);add(158,544,1,0);add(158,544,2,0);add(158,544,0,0);
@@ -181,7 +217,7 @@ int main(void){
  selected_style=0;lock_screen_save(framebuffer);FILE *rotated=fopen(LOCK_ART_PATH,"r+b");assert(rotated);
  uint32_t rotation=2;assert(fseek(rotated,4,SEEK_SET)==0&&fwrite(&rotation,1,sizeof(rotation),rotated)==sizeof(rotation)&&fclose(rotated)==0);assert(!lock_screen_restore(f));
  selected_style=0;lock_screen_save(framebuffer);assert(lock_screen_restore(f));FILE *bad=fopen(LOCK_ART_PATH,"r+b");assert(bad);fputc(0,bad);fclose(bad);assert(!lock_screen_restore(f));free(f);
- assert(stops>=5);puts("PASS: actual exclusive auth loop blocks wrong/cancel/touch keys/pickup/multitouch/read faults; cold boot holds resume; OOM/display errors fail closed; cancel/idle deep-sleep; read faults follow the nonblocking policy; normal PIN and cached-art validation retained");
+ assert(stops>=5);puts("PASS: grace rechecked after wake at0/299/300/360/599s,deep-resume deadline,cold start,invalid/rollback clock,default-off; actual exclusive auth loop blocks wrong/cancel/touch keys/pickup/multitouch/read faults; cold boot holds resume; OOM/display errors fail closed; cancel/idle deep-sleep; read faults follow the nonblocking policy; normal PIN and cached-art validation retained");
 }
 '''
  (p/'test.c').write_text(unit)

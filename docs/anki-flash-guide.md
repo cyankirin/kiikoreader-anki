@@ -1,8 +1,8 @@
 # Anki 学习功能 · 刷机与使用说明
 
-本分支在 **kiikoread 官方 rc100** 基础上移植了 Anki 卡组学习功能，版本号 **0.3.3-rc100.02**。
+本分支在 **kiikoread 官方 rc102** 基础上移植了 Anki 卡组学习功能，版本号 **0.3.3-rc102.01**。
 
-固件文件： [`firmware/Read_Pico-0.3.3-rc100.02.bin`](../firmware/Read_Pico-0.3.3-rc100.02.bin)（3.3 MB，只烧应用分区 0x10000）
+固件文件： [`firmware/Read_Pico-0.3.3-rc102.01.bin`](../firmware/Read_Pico-0.3.3-rc102.01.bin)（3.3 MB，只烧应用分区 0x10000）
 
 ---
 
@@ -36,7 +36,7 @@
 打开乐鑫 **Flash Download Tool**（Espressif Flash Download Tool）：
 
 1. ChipType 选择 **ESP32-S3**，WorkMode 选择 **Develop**，加载模式选默认；
-2. 在下载列表第一行选择本仓库的 `Read_Pico-0.3.3-rc100.02.bin`，**地址填 `0x10000`**；
+2. 在下载列表第一行选择本仓库的 `Read_Pico-0.3.3-rc102.01.bin`，**地址填 `0x10000`**；
 3. 波特率建议 `921600`（不稳就降到 `460800`），选择设备串口后点击 **START**；
 4. 等待 `FINISH`，设备会自动重启。
 
@@ -45,7 +45,7 @@
 ```bash
 python -m esptool --chip esp32s3 -p COM3 -b 460800 \
   write_flash --flash_mode dio --flash_freq 80m --flash_size 16MB \
-  0x10000 Read_Pico-0.3.3-rc100.02.bin
+  0x10000 Read_Pico-0.3.3-rc102.01.bin
 ```
 
 > ⚠️ 只写 `0x10000` 这一个地址，不要动 bootloader（0x0）、分区表（0x8000）、otadata（0xd10000）。

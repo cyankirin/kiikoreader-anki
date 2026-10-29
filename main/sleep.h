@@ -28,6 +28,9 @@ typedef enum {
     APP_WAKE_TIMEOUT,
 } app_wake_source_t;
 
+/// 已确认按键唤醒后检查有效时钟下的免密期限。/ Check grace with a valid clock only after confirmed key wake.
+bool lock_pin_grace_active(void);
+
 /// 登记常开供电的触摸与加速度计，并准备 CPU 浅睡保持区。/ Bind always-on touch/accelerometer and prepare CPU light-sleep retention.
 void app_sleep_bind(cst836u_handle_t tp, sc7a20h_handle_t acc);
 /// 深睡保持原面板画面，TF就绪后恢复真实参考；不等待挂载、不改解锁规则。

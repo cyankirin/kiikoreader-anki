@@ -1,29 +1,89 @@
 {
   "schema": 1,
-  "tag": "metalio-s31-v0.3.3-rc100",
+  "tag": "metalio-s31-v0.3.3-rc106",
   "files": {
     "bootloader.bin": {
-      "asset": "Metalio-S31-bootloader-0.3.3-rc100.bin",
+      "asset": "Metalio-S31-bootloader-0.3.3-rc106.bin",
       "size": 22448,
-      "sha256": "23d087cf202a768b5fc6c951f9c7de1848481ff6f1dc30cb9d804b84c192b183"
+      "sha256": "dbdc70fcab710456201a35d933a9b7a84c28c5391cd3abcebd3eacfd1e66d2cc"
     },
     "partitions.bin": {
-      "asset": "Metalio-S31-partitions-0.3.3-rc100.bin",
+      "asset": "Metalio-S31-partitions-0.3.3-rc106.bin",
       "size": 3072,
       "sha256": "6a5500c826a7957e06233d2a580e8378106ce88a31db2857ccb5333a3c5f84bc"
     },
     "firmware.bin": {
-      "asset": "kiikoread-metalio47-0.3.3-rc100.bin",
-      "size": 4498208,
-      "sha256": "a2f0ba9ea7235e9433dad8d8de8e2eeb8e5e17fbeabf2ea7c5b6472f3da80df5"
+      "asset": "kiikoread-metalio47-0.3.3-rc106.bin",
+      "size": 4735072,
+      "sha256": "e27116c2990b41f2769cbb98729047b9207ff686decd7c263e1ff85922922ac7"
     },
     "ota_data_initial.bin": {
-      "asset": "Metalio-S31-ota-data-0.3.3-rc100.bin",
+      "asset": "Metalio-S31-ota-data-0.3.3-rc106.bin",
       "size": 8192,
       "sha256": "7d2c7ac4888bfd75cd5f56e8d61f69595121183afc81556c876732fd3782c62f"
     }
   },
   "historical": [
+    {
+      "tag": "metalio-s31-v0.3.3-rc105",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc105.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc105.bin",
+          "size": 4732400,
+          "sha256": "3570fe10f5962007438b88c83bcc4685db5e7324c2836e54418a6cbe4b9db00d"
+        }
+      }
+    },
+    {
+      "tag": "metalio-s31-v0.3.3-rc104",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc104.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc104.bin",
+          "size": 4726976,
+          "sha256": "d62c5bbbba99d00398f42e0bb487dfc758a346819dd31a53cec1c96df9748379"
+        }
+      }
+    },
+    {
+      "tag": "metalio-s31-v0.3.3-rc103",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc103.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc103.bin",
+          "size": 4511648,
+          "sha256": "88d07336787fefa31a168f98ca89d9a78c8f7652673ba55d558568d002c0bcac"
+        }
+      }
+    },
+    {
+      "tag": "metalio-s31-v0.3.3-rc102",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc102.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc102.bin",
+          "size": 4510880,
+          "sha256": "beb62067ce9a9e822c00cc96b4eaabe295ef18f8a0b124e02366dfbea8dd6808"
+        }
+      }
+    },
+    {
+      "tag": "metalio-s31-v0.3.3-rc101",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc101.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc101.bin",
+          "size": 4499408,
+          "sha256": "f2739aec5d0a133645feff70b77f1669eb97dfa56625a1cc325328ede4896d7a"
+        }
+      }
+    },
+    {
+      "tag": "metalio-s31-v0.3.3-rc100",
+      "files": {
+        "Metalio-S31-update-0.3.3-rc100.bin": {
+          "asset": "kiikoread-metalio47-0.3.3-rc100.bin",
+          "size": 4498208,
+          "sha256": "a2f0ba9ea7235e9433dad8d8de8e2eeb8e5e17fbeabf2ea7c5b6472f3da80df5"
+        }
+      }
+    },
     {
       "tag": "metalio-s31-v0.3.3-rc98",
       "files": {

@@ -24,6 +24,7 @@
 #include "ttf_font.h"
 #include "ui_font.h"
 #include "ui_image_dither.h"
+#include "ui_glass.h"
 #include "settings.h"
 
 #define UI_SEL_INSET 4
@@ -257,6 +258,49 @@ static void draw_frosted(uint8_t *fb, EpdRect rect, bool pocket) {
 void ui_draw_acrylic_guard(uint8_t *fb, EpdRect rect) { draw_frosted(fb, rect, false); }
 void ui_draw_frosted_pocket(uint8_t *fb, EpdRect rect) { draw_frosted(fb, rect, true); }
 
+void ui_draw_liquid_shelf_rail(uint8_t *fb, EpdRect rect) {
+    if (!fb || rect.width < 64 || rect.height < 24 || rect.height > 64 ||
+        rect.x < 0 || rect.y < 0 || rect.width > epd_rotated_display_width() ||
+        rect.height > epd_rotated_display_height() ||
+        rect.x > epd_rotated_display_width() - rect.width ||
+        rect.y > epd_rotated_display_height() - rect.height) return;
+    EpdRect glass = rect; glass.height -= 8;
+    int radius = glass.height / 2;
+    if (radius > 14) radius = 14;
+    // 复用菜单的七抽头模糊与折射，工作区最多644×41字节；分配失败保留可辨认的实色挡条。
+    // Reuse menu blur/refraction, at most644×41 workspace bytes for a full rail; OOM retains a readable solid rail.
+    if (!ui_glass_panel(fb, glass, radius, 30, 55)) {
+        ui_fill_round_rect(fb, glass, radius, 0xd0);
+    } else {
+        // 书夹没有文字控件，补回菜单玻璃为可读性压暗的白位，书间白底不变成灰块。
+        // Rails have no text controls: restore the menu glass's readability dimming so gaps stay white.
+        for (int y=0;y<glass.height;++y) for (int x=0;x<glass.width;++x) {
+            int dx=x<radius?radius-x-1:x>=glass.width-radius?x-(glass.width-radius):0;
+            int dy=y<radius?radius-y-1:y>=glass.height-radius?y-(glass.height-radius):0;
+            if(dx*dx+dy*dy>=radius*radius)continue;
+            int value=(ui_read_pixel(fb,glass.x+x,glass.y+y)*15+6)/12;
+            epd_draw_pixel(glass.x+x,glass.y+y,(uint8_t)((value>15?15:value)<<4),fb);
+        }
+    }
+    ui_draw_round_rect(fb, glass, radius, 0xa0);
+    ui_hairline(fb, glass.y + 1, glass.x + radius, glass.width - 2 * radius, UI_GRAY_WHITE);
+    ui_hairline(fb, glass.y + glass.height - 2, glass.x + radius, glass.width - 2 * radius, 0x90);
+    int cy = glass.y + glass.height / 2;
+    for (int side = 0; side < 2; ++side) {
+        int cx = side ? glass.x + glass.width - 15 : glass.x + 14;
+        epd_fill_circle(cx, cy, 4, 0xc0, fb);
+        epd_draw_circle(cx, cy, 4, 0x70, fb);
+        epd_draw_line(cx - 2, cy + 1, cx + 1, cy + 1, 0x70, fb);
+        epd_draw_pixel(cx - 1, cy - 2, UI_GRAY_WHITE, fb);
+    }
+    // 层板和阴影也纳入同一缓存/快刷范围，不新增灰阶补刷或框外像素。
+    // Include the ledge/shadow in the same cache/fast conversion, with no extra presentation or pixels outside rect.
+    ui_fill_round_rect(fb, (EpdRect){rect.x + 2, rect.y + rect.height - 3, rect.width - 4, 3}, 1, 0xc0);
+    ui_fill_round_rect(fb, (EpdRect){rect.x, glass.y + glass.height, rect.width, 5}, 2, 0x90);
+    ui_hairline(fb, glass.y + glass.height, rect.x + 2, rect.width - 4, 0xb0);
+    ui_hairline(fb, glass.y + glass.height + 4, rect.x + 2, rect.width - 4, 0x50);
+}
+
 // 先用宽整数裁剪，再合并，避免异常坐标加法溢出。/ Clip using wide integers before union to avoid overflow on invalid coordinates.
 static EpdRect clip_refresh_rect(EpdRect r) {
     if (r.width <= 0 || r.height <= 0) return (EpdRect){0};
@@ -297,6 +341,40 @@ void ui_text(
     if (ui_text_uses_builtin(text))
         ui_font_draw_text_px(framebuffer, x, y_top + ui_font_ascender_px(px), px, text, align, fg, bg, false);
     else ttf_draw_text_px(framebuffer, x, y_top + ttf_ascender_px(px), px, text, align, fg, bg);
+}
+
+void ui_text_line_span_px(int px, const char* text, int* above, int* below) {
+    // 与 ui_text 完全同一条字体路径：内置位图与 TTF 的字面高度不同，换字体后按实测排。
+    // Exactly the ui_text face path: the bitmap and TTF faces differ in ink height, so layout
+    // follows the measured extents after any face change.
+    px = ui_text_effective_px(px);
+    int a = 0, b = 0;
+    if (text && text[0]) {
+        if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text))
+            ui_font_measure_line_px(px, text, &a, &b);
+        else ttf_measure_line_px(px, text, &a, &b);
+    }
+    if (above) *above = a;
+    if (below) *below = b;
+}
+
+int ui_text_ink_center_y(int y_top, int px, const char *text) {
+    // ui_text 把基线放在 y_top + ascender，墨迹自基线上下伸展（above/below 相对基线），
+    // 因此墨迹中心 = 基线 - (above - below) / 2，与 ui_text_fixed_context_vc 的落笔公式同源。
+    // ui_text puts the baseline at y_top + ascender with ink spreading around it, so the ink
+    // centre is baseline - (above - below) / 2 — the same placement ui_text_fixed_context_vc uses.
+    px = ui_text_effective_px(px);
+    int above = 0, below = 0, ascender = 0;
+    if (text && text[0]) {
+        if ((!s_system_ttf || ttf_font_is_builtin()) && ui_font_has_text(text)) {
+            ui_font_measure_line_px(px, text, &above, &below);
+            ascender = ui_font_ascender_px(px);
+        } else {
+            ttf_measure_line_px(px, text, &above, &below);
+            ascender = ttf_ascender_px(px);
+        }
+    }
+    return y_top + ascender - (above - below) / 2;
 }
 
 int ui_text_fixed_width_px(int px, const char* text) {

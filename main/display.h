@@ -17,6 +17,7 @@
 #include "e0470_page_turn.h"
 #include "read_pico_epd_timing.h"
 
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -122,6 +123,7 @@ enum EpdDrawError update_display_water_turn(EpdiyHighlevelState* hl, EpdRect are
                                              e0470_turn_dir_t dir);
 /// 同步普通文字翻页沿用水波纹的全部灰阶相位，单带同时输出并恢复原节拍。/ Ordinary text uses all ripple gray phases in one synchronous band and restores pacing.
 enum EpdDrawError update_display_text_turn(EpdiyHighlevelState* hl, EpdRect area, e0470_turn_dir_t dir);
+
 /// 动画中间帧使用灰阶波形，但不累计周期清屏计数；动画最终帧走普通刷新出口。
 /// Use grayscale for animation strips without advancing periodic cleanup; the final frame uses the normal path.
 
@@ -130,6 +132,12 @@ int display_pclk_mhz(void);
 /// 出现供数不足就退回安全频率并整屏重刷，其它错误码原样忽略。
 /// On underrun, drop to the safe clock and full-refresh; other error bits are ignored.
 void guard_draw_result(EpdiyHighlevelState* hl, enum EpdDrawError result);
+
+#if !KIIKO_BOARD_METALIO47
+/// Pico根页切换补白许可：0关闭、6普通、8涉及书架，仅在一次真实根页推屏中生效并恢复。
+/// Scope Pico root whitening:0 off,6 ordinary,8 involving the shelf; restore the prior value after presentation.
+unsigned display_main_quality_set(unsigned white_phases);
+#endif
 
 #ifdef __cplusplus
 }

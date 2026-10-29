@@ -142,3 +142,6 @@ target_link_options(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=esp_panic_handler")
 if("$ENV{KIIKO_LOCAL_LATENCY}" STREQUAL "1")
     target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_LOCAL_LATENCY=1)
 endif()
+
+# Pico RC102: enable the verified board-native root whitening profile.
+target_compile_definitions(${COMPONENT_LIB} PRIVATE KIIKO_PICO_MAIN_CLEAN=1)
