@@ -127,3 +127,4 @@ Desktop.ini
 !flash/metalio/releases/*/bootloader.bin
 !flash/metalio/releases/*/partitions.bin
 !flash/metalio/releases/*/ota_data_initial.bin
+sdkconfig.bak*
