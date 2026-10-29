@@ -2033,6 +2033,14 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
             if (strcmp(app_settings_system_font_path(),s_font_sync_path)) {
                 snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
             }
+            // 这里就是用户所说的「在设置里换字体」：显式选择必须解除异常启动
+            // 加在系统字体上的内建锁，否则下面这次激活会立刻把它换回内建，
+            // 界面毫无变化，直到下一次干净启动。
+            // This is the "change the font in Settings" the user reported: an
+            // explicit pick must release the built-in lock that an abnormal
+            // boot put on the system face, or the activation right below
+            // reverts it and nothing visibly changes until a clean boot.
+            app_font_allow_user_choice();
             app_font_activate_system();s_notice[0]=0;
             s_font_sync_confirm=strcmp(app_settings_font_path(),s_font_sync_path)!=0;
             return APP_REDRAW_PAGE;

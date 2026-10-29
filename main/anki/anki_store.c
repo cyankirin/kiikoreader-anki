@@ -661,6 +661,15 @@ esp_err_t anki_store_load(int64_t deck_id, anki_deck_t* out) {
                 slot->qfmt = copy_owned(q, qlen);
                 slot->afmt = copy_owned(a, alen);
                 if (!slot->qfmt || !slot->afmt) {
+                    // 只成功了一半时不能留下悬空指针：template_count 未增，
+                    // free_deck_arrays 不会释放这一格，必须在这里自己清。
+                    // A half-built template must not keep a pointer: the count
+                    // was never bumped, so free_deck_arrays will not reach this
+                    // slot and the successful half would leak.
+                    free(slot->qfmt);
+                    free(slot->afmt);
+                    slot->qfmt = NULL;
+                    slot->afmt = NULL;
                     r.overflow = true;
                     break;
                 }

@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "app.h"
+#include "app_font_context.h"
 #include "display.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -433,6 +434,14 @@ static app_redraw_t bench_run(app_ctx_t* ctx, bool cold) {
 static app_redraw_t pick(int index) {
     if (font_is_current(index)) return APP_REDRAW_NONE;
     bench_reset();
+    // 显式选择优先于异常启动的内建回退：不清这把锁的话，用户在这里点任何
+    // 字体，下一次 app_font_activate_system()（切页就会调）都会把它换回内建，
+    // 看起来就是「换字体没反应，重启才好」。
+    // An explicit pick outranks the built-in fallback of an abnormal boot:
+    // without releasing that lock, any pick here is undone by the next
+    // app_font_activate_system() (called on every page switch), which reads
+    // exactly as "changing the font does nothing until a reboot".
+    app_font_allow_user_choice();
     if (index == 0) {
         app_settings_set_font_path("");
         ttf_font_open_builtin();
@@ -448,6 +457,12 @@ static app_redraw_t pick(int index) {
             ESP_LOGW(TAG, "font switch %s: %s", item->path, esp_err_to_name(err));
         }
     }
+    // 立刻把界面字体上下文切到这次选择：本页重绘是 APP_REDRAW_FULL，
+    // 不在这里同步的话样例行仍按上一套（内建）绘制，用户看不到变化。
+    // Switch the UI font context to this pick right away: the page repaints
+    // with APP_REDRAW_FULL, and without syncing here the sample lines keep the
+    // previous (built-in) face and the pick looks like it did nothing.
+    app_font_activate_system();
     ESP_LOGI(TAG, "font %s", ttf_font_path());
     return APP_REDRAW_FULL;
 }

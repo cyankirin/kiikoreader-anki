@@ -20,3 +20,9 @@ void app_font_end_lock(const app_lock_font_t *saved);
 bool app_font_activate_system(void);
 bool app_font_activate_reading(void);
 bool app_font_retry_active(void);
+/// 用户显式选过字体：解除异常启动加在系统/阅读字体上的内建锁，并清掉「已
+/// 拒绝」记录，让这次选择（以及之后的每次激活）真的去加载用户选的字。
+/// The user picked a face explicitly: release the built-in lock an abnormal
+/// boot put on the system and reading faces, and clear the rejection record so
+/// this choice — and every later activation — really loads the picked face.
+void app_font_allow_user_choice(void);

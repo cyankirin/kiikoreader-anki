@@ -54,8 +54,15 @@ static char* copy_text(const char* src, size_t len) {
     return out;
 }
 
-/// 定长数组增长；新槽由调用方在每次追加时清零。/ Grow a fixed-stride array;
-/// the caller zeroes each appended slot.
+/// 定长数组增长；新槽由调用方在每次追加时清零。旧表在这里还回去：
+/// 导入 1375 张卡的卡组时 notes/cards 各经过 16→32→…→2048 五次翻倍，
+/// 每次翻倍都丢掉一整份旧表——千卡卡组一次导入就漏掉约 160KB PSRAM，
+/// 反复导入会逐步吃掉锁屏/深睡交接需要的内存。
+/// Grow a fixed-stride array; the caller zeroes each appended slot. The old
+/// table is handed back here: importing a 1375-card deck doubles notes and
+/// cards five times (16→32→…→2048) and every doubling used to abandon a whole
+/// old table — about 160KB of PSRAM leaked per 1000-card import, enough to
+/// starve the lock/deep-sleep handoff when imports repeat.
 static void* grow(void* data, int* cap, size_t item, int need) {
     if (need <= *cap) return data;
     int next = *cap ? *cap * 2 : 16;
@@ -63,6 +70,7 @@ static void* grow(void* data, int* cap, size_t item, int need) {
     void* p = anki_alloc((size_t)next * item);
     if (!p) return NULL;
     if (data && *cap) memcpy(p, data, (size_t)(*cap) * item);
+    free(data);
     *cap = next;
     return p;
 }

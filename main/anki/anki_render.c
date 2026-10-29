@@ -21,10 +21,33 @@
 #include "esp_log.h"
 #include "html_text.h"
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
+
 #define TAG "anki_render"
 
 #define HTML_BUILD_MAX (48U * 1024U)
 #define FIELD_VALUE_MAX (16U * 1024U)
+
+/// 字段清洗的临时缓冲。必须优先落在 PSRAM：FIELD_VALUE_MAX 恰好等于
+/// CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL(16384)，普通 malloc 会优先从内部 RAM
+/// 取——那是设备上最紧张的一池，文件锁、任务栈与内建字库都只能在那里分配，
+/// 而选择题每画一面就要一整块 16KB。ESP-IDF 的 free 同时覆盖 PSRAM 与内部
+/// RAM，释放处不必区分。
+/// The field-cleaning scratch must prefer PSRAM: FIELD_VALUE_MAX equals
+/// CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (16384), so a plain malloc takes it from
+/// internal RAM — the tightest pool, where file locks, task stacks and the
+/// built-in face must live, and every choice card side would take a full 16KB
+/// from it. ESP-IDF's free covers PSRAM and internal RAM alike, so the free
+/// sites stay untouched.
+static char* field_scratch_alloc(void) {
+#ifdef ESP_PLATFORM
+    return heap_caps_malloc(FIELD_VALUE_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    return malloc(FIELD_VALUE_MAX);
+#endif
+}
 
 typedef struct {
     char* out;
@@ -582,10 +605,7 @@ static esp_err_t render_choice_front(const anki_collection_t* col, const anki_ca
     rc.nt = nt;
     split_fields(&rc, note->flds, strlen(note->flds), NULL, nt->field_count);
 
-    // 字段 HTML→文本的临时缓冲走堆：内部 RAM 静态区已近满，不给 BSS 添 16KB。
-    // The field HTML-to-text scratch buffer is heap-allocated: internal RAM
-    // is nearly full of statics, so BSS must not grow by 16KB.
-    char* buf = malloc(FIELD_VALUE_MAX);
+    char* buf = field_scratch_alloc();
     if (!buf) return ESP_ERR_NO_MEM;
 
     builder_t b = {.out = out, .len = 0, .cap = cap, .overflow = false};
@@ -643,10 +663,7 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     rc.nt = nt;
     split_fields(&rc, note->flds, strlen(note->flds), NULL, nt->field_count);
 
-    // 字段 HTML→文本的临时缓冲走堆：内部 RAM 静态区已近满，不给 BSS 添 16KB。
-    // The field HTML-to-text scratch buffer is heap-allocated: internal RAM
-    // is nearly full of statics, so BSS must not grow by 16KB.
-    char* buf = malloc(FIELD_VALUE_MAX);
+    char* buf = field_scratch_alloc();
     if (!buf) return ESP_ERR_NO_MEM;
 
     builder_t b = {.out = out, .len = 0, .cap = cap, .overflow = false};

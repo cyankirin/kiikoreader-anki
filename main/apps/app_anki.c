@@ -112,6 +112,30 @@ static anki_session_t* session_state(void) {
     return s_session;
 }
 
+// ---------------------------------------------------------------- 内存水位
+
+/// 打印一次内存水位：PSRAM 与内部 RAM 的剩余量，外加 PSRAM 最大连续块。
+/// 设备上的日志级别是 ERROR（WARN/INFO 已被编译掉），所以这里用 ESP_LOGE——
+/// 用户接串口就能读到「学了几次之后还剩多少」，这是判断锁屏重启是否为内存
+/// 耗尽、以及字体为何加载失败的唯一现场证据。
+/// Print one memory watermark: free PSRAM, free internal RAM and the largest
+/// contiguous PSRAM block. The device builds at ERROR level (WARN/INFO are
+/// compiled out), so this uses ESP_LOGE — a user with a serial console then
+/// reads "how much is left after N sessions", the only field evidence for
+/// whether the lock-time reboot is memory exhaustion and why the font failed.
+/// 点位固定三个：进入学习、退出学习、进入锁屏。/ Three fixed points: study
+/// enter, study exit, lock enter.
+static void anki_heap_log(const char* where) {
+#ifdef ESP_PLATFORM
+    ESP_LOGE(TAG, "heap %s: psram=%u internal=%u psram_block=%u", where,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+#else
+    (void)where; // 宿主没有 caps 分区堆 / the host has no caps heaps
+#endif
+}
+
 // ---------------------------------------------------------------- 工具
 
 #define SESS() (session_state())
@@ -321,6 +345,9 @@ static void session_start(int deck_index) {
     SESS()->again = 0;
     SESS()->good_or_better = 0;
     SESS()->active = true;
+    // 整库已载入：这里是 Anki 页内存占用的峰值点位。
+    // The whole deck is loaded: this is the Anki page's memory peak.
+    anki_heap_log("anki study enter");
     if (SESS()->session_count == 0) {
         s_view = ANKI_VIEW_SUMMARY;
         return;
@@ -335,6 +362,33 @@ static void session_end(void) {
     SESS()->active = false;
     s_view = ANKI_VIEW_DECKS;
     scan_decks();
+    anki_heap_log("anki exit");
+}
+
+/// 卸掉学习会话，把整库占用的 PSRAM 还给堆，并把页面摆回一个自洽的状态。
+/// 逐张进度在评分时已经落盘，所以这里丢掉会话队列不丢学习进度；返回卡组
+/// 列表而不是留在只剩空指针的学习页，解锁后的重绘因此不会碰到已释放的
+/// 卡表（那是 use-after-free）。
+/// Drop the study session and hand the whole deck's PSRAM back, leaving the
+/// page in a self-consistent state. Per-card progress was already written on
+/// every grade, so discarding the queue loses no study progress; the page
+/// falls back to the deck list instead of staying on a study view whose card
+/// table is gone (which the post-unlock repaint would use after free).
+static void session_release(void) {
+    if (!SESS()) return;
+    if (SESS()->active) anki_store_unload(&SESS()->deck);
+    SESS()->active = false;
+    SESS()->session_count = 0;
+    SESS()->session_pos = 0;
+    SESS()->show_back = false;
+    SESS()->back_loaded = false;
+    SESS()->front[0] = 0;
+    SESS()->back[0] = 0;
+    SESS()->layout.line_count = 0;
+    SESS()->layout.line_page = 0;
+    SESS()->layout.text = SESS()->front;
+    if (s_view == ANKI_VIEW_STUDY || s_view == ANKI_VIEW_SUMMARY) s_view = ANKI_VIEW_DECKS;
+    if (s_page < 0) s_page = 0;
 }
 
 static void session_next(void) {
@@ -547,12 +601,9 @@ static void on_enter(app_ctx_t* ctx) {
     (void)ctx;
     s_page = 0;
     message_set(NULL);
-    if (SESS()->active) {
-        // 防御：带会话状态重进本页时先卸载旧会话。/ Defensive: drop a live
-        // session when re-entering the page.
-        anki_store_unload(&SESS()->deck);
-        SESS()->active = false;
-    }
+    // 防御：带会话状态重进本页时先卸载旧会话。/ Defensive: drop a live
+    // session when re-entering the page.
+    session_release();
     // 文件页带了 .apkg 进来：保持忙碌态，等下一 tick 导入，别被卡组列表盖掉。
     // / Arriving from the file page with an .apkg: stay busy and import on the
     // next tick instead of painting the deck list over it.
@@ -572,7 +623,25 @@ static void anki_on_exit(app_ctx_t* ctx) {
     if (SESS()->active) {
         anki_store_unload(&SESS()->deck);
         SESS()->active = false;
+        anki_heap_log("anki exit");
     }
+}
+
+/// 锁屏前释放学习会话：电源键锁屏走的是 on_before_lock，它比 on_exit 更早，
+/// 而且此时页面不会切走——所以必须在锁图绘制、帧缓存写入、深睡交接之前把
+/// 整库卸掉，把 PSRAM 让给锁屏路径。这里刻意不调用 scan_decks()：那会重新
+/// 把每个 .akd 整份读进内存（千卡卡组 600KB），正好抵消刚让出来的空间。
+/// Release the study session before locking: a power-key lock goes through
+/// on_before_lock, which runs earlier than on_exit and never leaves the page,
+/// so the whole deck must go before the lock art, frame cache write and deep
+/// sleep handoff need that PSRAM. It deliberately skips scan_decks(): rescanning
+/// reads every .akd back into memory (600KB for a thousand-card deck) and would
+/// hand back exactly the room just freed.
+static void anki_before_lock(app_ctx_t* ctx) {
+    (void)ctx;
+    anki_heap_log("anki lock enter");
+    session_release();
+    anki_heap_log("anki lock released");
 }
 
 static void import_request(const char* path) {
@@ -845,6 +914,10 @@ const app_desc_t app_anki = {
     .render = render,
     .on_enter = on_enter,
     .on_exit = anki_on_exit,
+    // 电源键锁屏：先把整库还给堆，再让锁屏路径去画图与交接深睡。
+    // Power-key lock: hand the deck back to the heap before the lock path
+    // draws its art and hands off to deep sleep.
+    .on_before_lock = anki_before_lock,
     .on_gesture = on_gesture,
     // 注意：注册了 on_gesture 后主循环不再调用 on_touch（全部触摸走手势
     // 通道），故不上报 .on_touch；点击统一经 on_gesture 的 TAP 分支处理。

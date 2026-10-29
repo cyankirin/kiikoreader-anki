@@ -798,6 +798,10 @@ static void open_selected(app_ctx_t *ctx) {
     } else if (!strcasecmp(ext, ".ttf") || !strcasecmp(ext, ".otf")) {
         if (ttf_font_open(s_selected.path) == ESP_OK) {
             app_settings_set_system_font_path(s_selected.path);
+            // 显式选择优先于异常启动的内建回退，否则下面的激活会把它换回去。
+            // An explicit pick outranks the abnormal-boot built-in fallback, or
+            // the activation below would undo it.
+            app_font_allow_user_choice();
             app_font_activate_system();
             snprintf(s_message, sizeof(s_message), "已设为系统字体");
         } else snprintf(s_message, sizeof(s_message), "字体无法加载");
