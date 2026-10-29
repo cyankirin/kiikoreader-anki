@@ -160,6 +160,15 @@ static bool v2_add_notetype(v2_build_t* b, int64_t mid, const char* name,
             slot->qfmt = copy_text(q ? q : "", q ? qlen : 0);
             slot->afmt = copy_text(a ? a : "", a ? alen : 0);
             if (!slot->qfmt || !slot->afmt) {
+                // 半成品模板不能留下指针：template_count 未增，anki_apkg_free
+                // 只释放到 template_count 为止，成功的那一半会永久泄漏。
+                // A half-built template must not keep a pointer: the count was
+                // never bumped and anki_apkg_free stops at template_count, so
+                // the successful half would leak for good.
+                free(slot->qfmt);
+                free(slot->afmt);
+                slot->qfmt = NULL;
+                slot->afmt = NULL;
                 b->failed = true;
                 return false;
             }
@@ -427,6 +436,13 @@ static bool v3_on_template(int64_t rowid, const anki_sql_value_t* v, int count, 
         slot->afmt = copy_text("", 0);
     }
     if (!slot->qfmt || !slot->afmt) {
+        // 同 v2：半成品模板必须就地清空，否则成功的 qfmt 泄漏。
+        // Same as the v2 path: clear a half-built template in place, or the
+        // successful qfmt leaks.
+        free(slot->qfmt);
+        free(slot->afmt);
+        slot->qfmt = NULL;
+        slot->afmt = NULL;
         b->failed = true;
         return false;
     }
@@ -656,7 +672,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
     size_t collection_len = 0;
     FILE* probe = fopen(path, "rb");
     if (!probe) {
-        ESP_LOGW(TAG, "cannot open %s", path);
+        ESP_LOGE(TAG, "cannot open %s", path);
         return ESP_ERR_NOT_FOUND;
     }
     uint8_t magic[16] = {0};
@@ -669,14 +685,14 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
         err = read_file(path, &collection, &collection_len);
     }
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "collection read failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "collection read failed: %s", esp_err_to_name(err));
         return err;
     }
 
     anki_sqlite_t* db = NULL;
     err = anki_sql_open(collection, collection_len, &db);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "collection open failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "collection open failed: %s", esp_err_to_name(err));
         free(collection);
         return err;
     }
@@ -684,7 +700,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
     bool v3 = anki_sql_table_root(db, "notetypes") != 0;
     bool v2 = anki_sql_table_root(db, "col") != 0;
     if (!v3 && !v2) {
-        ESP_LOGW(TAG, "no col or notetypes table");
+        ESP_LOGE(TAG, "no col or notetypes table");
         anki_sql_close(db);
         free(collection);
         return ESP_ERR_NOT_SUPPORTED;
@@ -701,7 +717,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
         if (err == ESP_OK && !build.failed)
             err = anki_sql_scan_table(db, "decks", v3_on_deck, &build);
         if (err != ESP_OK || build.failed) {
-            ESP_LOGW(TAG, "v3 schema parse failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "v3 schema parse failed: %s", esp_err_to_name(err));
             goto fail;
         }
     } else {
@@ -750,12 +766,12 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
             size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 #else
             size_t psram_free = 0; // 宿主没有 PSRAM 概念 / the host has no PSRAM notion
-            (void)psram_free;      // 宿主 ESP_LOGW 为空宏，防未用告警 / host ESP_LOGW is a no-op
+            (void)psram_free;      // 宿主 ESP_LOGE 也为空宏，防未用告警 / host ESP_LOGE is a no-op too
 #endif
             // 分配失败必须有日志：真机上这条路径曾完全静默，UI 也看不到原因。
             // / Allocation failure must log: this path used to be fully silent
             // on the device, with the UI hiding the reason too.
-            ESP_LOGW(TAG, "col staging alloc failed (%zu+%zu bytes, %zu PSRAM free)",
+            ESP_LOGE(TAG, "col staging alloc failed (%zu+%zu bytes, %zu PSRAM free)",
                      measure.models_len + 1, measure.decks_len + 1, psram_free);
             free(models_buf);
             free(decks_buf);
@@ -798,7 +814,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
         free(models_buf);
         free(decks_buf);
         if (!parsed) {
-            ESP_LOGW(TAG, "v2 col parse failed");
+            ESP_LOGE(TAG, "v2 col parse failed");
             goto fail;
         }
     }
@@ -809,7 +825,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
         if (err == ESP_OK && !build.failed)
             err = anki_sql_scan_table(db, "cards", on_card, &build);
         if (err != ESP_OK || build.failed) {
-            ESP_LOGW(TAG, "notes/cards parse failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "notes/cards parse failed: %s", esp_err_to_name(err));
             goto fail;
         }
     }
@@ -817,7 +833,7 @@ esp_err_t anki_apkg_import(const char* path, anki_import_t* out) {
     anki_sql_close(db);
     free(collection);
     if (out->deck_count == 0 || out->card_count == 0) {
-        ESP_LOGW(TAG, "empty deck import");
+        ESP_LOGE(TAG, "empty deck import");
         anki_apkg_free(out);
         return ESP_ERR_INVALID_SIZE;
     }

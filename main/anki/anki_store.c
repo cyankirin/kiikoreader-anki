@@ -265,7 +265,7 @@ static esp_err_t write_deck_file(const anki_import_t* imp, const anki_deck_info_
     }
     need += (size_t)card_total * CARD_RECORD;
     if (need > ANKI_DECK_FILE_MAX) {
-        ESP_LOGW(TAG, "deck %s too large: %zu bytes", deck->name, need);
+        ESP_LOGE(TAG, "deck %s too large: %zu bytes", deck->name, need);
         return ESP_ERR_INVALID_SIZE;
     }
 
@@ -711,7 +711,7 @@ esp_err_t anki_store_load(int64_t deck_id, anki_deck_t* out) {
     free(data);
     if (r.overflow || out->card_count != summary.total || out->note_count != (int)note_count ||
         out->notetype_count != (int)notetype_count) {
-        ESP_LOGW(TAG, "deck %lld load inconsistent", (long long)deck_id);
+        ESP_LOGE(TAG, "deck %lld load inconsistent", (long long)deck_id);
         anki_store_unload(out);
         return ESP_ERR_INVALID_SIZE;
     }
