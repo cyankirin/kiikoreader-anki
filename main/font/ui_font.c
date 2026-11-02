@@ -108,6 +108,17 @@ int ui_font_ascender_px(int px) {
     stbtt_GetFontVMetrics(&s_font, &asc, &desc, &gap);
     return (int)lroundf(asc * scale_for(px));
 }
+
+// 字体的下延伸（基线以下的设计高度）。与 ui_font_ascender_px 合起来是行盒：
+// 字形都落在里面，行距按行盒算就不会压字。
+// The font's descender (design height below the baseline). With
+// ui_font_ascender_px it forms the line box that holds every glyph.
+int ui_font_descender_px(int px) {
+    if (!ready()) return 0;
+    int asc, desc, gap;
+    stbtt_GetFontVMetrics(&s_font, &asc, &desc, &gap);
+    return (int)lroundf(-(float)desc * scale_for(px));
+}
 void ui_font_measure_line_px(int px, const char *text, int *above, int *below) {
     int top = 0, bottom = 0;
     if (text && ready()) {

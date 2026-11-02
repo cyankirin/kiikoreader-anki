@@ -74,6 +74,9 @@ python3 tools/build_firmware.py --board metalio47 --python /path/to/idf-python/b
 
 两块板共用同一份 `main/`、`components/` 维护源码；只有硬件、驱动和确有平台差异的行为才放进 `boards/<设备>/src/` 覆盖。/ Both boards share one `main/` and `components/` source; only hardware, driver and platform-specific behaviour live in the `boards/<device>/src/` overlay.
 
+**反向警告（改错地方不会报错，只是不生效）/ Reverse warning — edits in the wrong file silently do nothing**：`main/` 里被 `boards/<board>/src/` 覆盖的文件是 Pico 的死代码。改动只有落在 `boards/pico/src/…` 才会编进 Pico 固件；改 `main/` 同名文件既不报错也不生效（S31 仍会用到它）。当前 Pico 视图覆盖 **19** 个 `main/` 源码（`cmake/board.cmake` 的 `kiiko_board_sources()` 决定，例如 `main/apps/app_dashboard.c`、`main/apps/app_files.c`、`main/ui/ui_kit.c`、`main/font/ttf_font.c`、`main/ota_release.c`）；查清单用 `cd boards/pico/src && find . -name '*.c'`，再和仓库根的同名文件对照。改完务必确认编译的是哪一份：`grep -c <符号> main/<文件> boards/pico/src/<文件>`。
+/ Files under `main/` that are shadowed by `boards/<board>/src/` are dead code for Pico: only an edit under `boards/pico/src/…` reaches the Pico image, while the same edit in `main/` neither fails nor takes effect (S31 still uses it). The Pico view currently shadows **19** `main/` sources, decided by `kiiko_board_sources()` in `cmake/board.cmake` (for example `main/apps/app_dashboard.c`, `main/apps/app_files.c`, `main/ui/ui_kit.c`, `main/font/ttf_font.c`, `main/ota_release.c`). Before and after a change, check which copy is compiled: `grep -c <symbol> main/<file> boards/pico/src/<file>`.
+
 ### 版本号与本地测试 / Versions and local tests
 
 用户 2026-10-06 确认：本地测试沿用当前正式发布的固件版本号，用测试日期和说明区分；正式上线时才递增版本号，并同步设备、刷机页、升级包与日志。不要为每次本地修复另增 rc 编号。

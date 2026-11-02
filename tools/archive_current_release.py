@@ -13,7 +13,7 @@ def archive(folder: Path, commit: str, payloads: Path | None = None) -> None:
     payloads = (payloads or folder).resolve()
     manifest = json.loads((folder / 'manifest.json').read_text())
     version = manifest['version']
-    assert re.fullmatch(r'\d+\.\d+\.\d+-rc\d+', version)
+    assert re.fullmatch(r'\d+\.\d+\.\d+-rc\d+(?:\.\d+)?', version)
     assert re.fullmatch(r'[a-f0-9]{40}', commit), 'original release commit required'
     assert manifest.get('new_install_prompt_erase') is True
     catalog_path = folder / 'releases.json'

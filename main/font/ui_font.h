@@ -13,6 +13,10 @@
 
 bool ui_font_has_text(const char *text);
 int ui_font_ascender_px(int px);
+/// 字体的下延伸（基线以下的设计高度），与 ui_font_ascender_px 合起来是行盒。
+/// The font's descender (design height below the baseline); together with
+/// ui_font_ascender_px it forms the line box.
+int ui_font_descender_px(int px);
 int ui_font_text_width_px(int px, const char *text);
 /// 含补充位图的标题整行使用原生24px；轮廓字形直接按目标字号生成。
 /// Titles containing bitmap supplements use native 24px throughout; outlines rasterize at the target size.

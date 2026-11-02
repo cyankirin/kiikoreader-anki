@@ -96,6 +96,13 @@ jobs:
           node tools/flasher_integrity_host_test.cjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
+          # Anki 卡组解析/渲染/调度的宿主测试与版面探针（本 fork 新增）。
+          # Host tests and the layout probe for the Anki importer/renderer/scheduler (this fork).
+          bash tools/run_anki_host_tests.sh
+          # 联网升级：清单解析/版本比较 + 两块板各自的 OTA 任务（rc103 起按板存放）。
+          # Online update: release parsing/ordering plus each board's own OTA worker,
+          # which lives per board since rc103.
+          bash tools/run_ota_host_tests.sh
 
   build:
     runs-on: ubuntu-latest

@@ -289,6 +289,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "apps/file_search.c"
         "apps/app_device_settings.c"
         "apps/app_image.c"
+        "apps/app_anki.c"
         "apps/app_transfer.c"
         "apps/usb_storage.c"
         "book/book_store.c"
@@ -310,6 +311,11 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "book/book_cover_auto.c"
         "book/zip_reader.c"
         "book/html_text.c"
+        "anki/anki_json.c"
+        "anki/anki_sqlite.c"
+        "anki/anki_apkg.c"
+        "anki/anki_render.c"
+        "anki/anki_store.c"
         "book/book_layout.c"
         "book/gbk.c"
         "font/ttf_font.c"
@@ -324,7 +330,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
 idf_component_register(
     SRCS ${kiiko_selected_sources}
     REQUIRES ${main_requires}
-    INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book"
+    INCLUDE_DIRS "." "app" "apps" "font" "ui" "factory" "book" "anki"
     EMBED_FILES
         "assets/loading_4bpp.bin"
         "assets/builtin.ttf"

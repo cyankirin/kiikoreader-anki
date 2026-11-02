@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="description" content="kiikoread · Anki 学习固件网页刷机：用 Chrome 或 Edge 连接墨水屏，一键写入本 fork 的 Anki 版固件，默认保留设备数据。">
+<title>kiikoread · Anki 学习固件 · 网页刷机</title>
+<style>
+  /* 中文：本页只依赖自身样式，避免与官网站点皮肤耦合。 / Self-contained styles on purpose. */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 56px;
+    background: #fff; color: #111;
+    font: 16px/1.7 -apple-system, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 640px; margin: 0 auto; }
+  a { color: #111; text-underline-offset: 3px; }
+  .back { display: inline-block; font-size: 14px; color: #555; text-decoration: none; border-bottom: 1px solid #ccc; }
+  .back:hover { color: #111; border-color: #111; }
+  p.eyebrow {
+    margin: 28px 0 6px; font-size: 12px; letter-spacing: .18em;
+    text-transform: uppercase; color: #777;
+  }
+  h1 { margin: 0 0 14px; font-size: 28px; line-height: 1.25; letter-spacing: -.01em; }
+  h1 span { color: #b9b9b9; }
+  .lede { margin: 0 0 22px; color: #333; }
+  .lede-en { margin: -10px 0 22px; color: #777; font-size: 14px; }
+  dl.meta {
+    display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px;
+    margin: 0 0 26px; padding: 16px 18px; border: 1px solid #e2e2e2; border-radius: 10px;
+    font-size: 14px;
+  }
+  dl.meta dt { color: #777; }
+  dl.meta dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .install { padding: 22px 18px; border: 1px solid #111; border-radius: 12px; text-align: center; }
+  .install p { margin: 0 0 16px; font-size: 14px; color: #555; }
+  button.activate {
+    appearance: none; cursor: pointer; border: 1px solid #111; border-radius: 999px;
+    background: #111; color: #fff; padding: 13px 26px; font-size: 16px; font-weight: 600;
+  }
+  button.activate:hover { background: #333; }
+  button.activate:disabled { background: #999; border-color: #999; cursor: not-allowed; }
+  .support { margin: 14px 0 0; font-size: 13px; color: #777; min-height: 1.2em; }
+  h2 { margin: 34px 0 10px; font-size: 16px; letter-spacing: .01em; }
+  ul { margin: 0; padding-left: 20px; color: #333; font-size: 14px; }
+  li { margin: 6px 0; }
+  code { font: 13px/1.5 ui-monospace, "SFMono-Regular", Consolas, monospace; background: #f4f4f4; padding: 1px 5px; border-radius: 4px; }
+  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #eee; font-size: 13px; color: #777; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="../">← 返回 kiikoread 首页</a>
+
+  <p class="eyebrow">KIIKOREAD · ANKI FORK</p>
+  <h1>kiikoread · Anki 学习固件<span>。</span></h1>
+  <p class="lede">
+    这是<b>本 fork</b>（kiikoread · Anki）的 Anki 版固件网页刷机入口：在设备上导入 <code>.apkg</code>，按 Anki 调度复习。
+    刷机会写入引导程序（<code>0x0</code>）、分区表（<code>0x8000</code>）、应用（<code>0x10000</code>）与启动槽标记（<code>0xd10000</code>）；<b>擦除是可选的</b>，默认不勾选。
+  </p>
+  <p class="lede-en">This fork adds Anki deck study on top of kiikoread. Flashing writes the bootloader, partition table, app and slot marker; erasing is an optional step whose checkbox is left unchecked, so your data stays.</p>
+
+  <dl class="meta">
+    <dt>固件版本</dt><dd id="meta-version">读取中…</dd>
+    <dt>构建时间</dt><dd id="meta-built">读取中…</dd>
+    <dt>适用设备</dt><dd>小纸 Pico · RDP-G01-W · ESP32-S3</dd>
+    <dt>数据策略</dt><dd>默认保留设置与阅读进度（询问页的「Erase device」保持不勾选）</dd>
+  </dl>
+
+  <div class="install">
+    <p>
+      用数据线连接墨水屏，然后点击下面的按钮。<br>
+      点下去后，本页会<b>先把四个部件各下载一次并逐个核对 SHA-256</b>，四项全部与清单一致才打开串口写入；
+      任何一项不一致都会立即中止，设备内容不受影响。
+    </p>
+    <p>
+      写入前还会出现一步「<b>Erase device</b>」询问：<b>保持不勾选</b>再点「Next」，设置与阅读进度就会保留；
+      勾选它才是整片擦除（本页不会替你勾上）。
+    </p>
+    <esp-web-install-button manifest="./manifest.json">
+      <button slot="activate" class="activate" type="button">连接墨水屏，开始刷机</button>
+      <span slot="unsupported">当前浏览器不支持 WebSerial：请改用电脑上的 Chrome 或 Edge，并通过 HTTPS 打开本页。</span>
+      <span slot="not-allowed">本页需要 HTTPS：请用 https 地址打开，或先运行本机的本地静态服务。</span>
+    </esp-web-install-button>
+    <p class="support" id="support-status"></p>
+  </div>
+
+  <h2>刷机前请确认</h2>
+  <ul>
+    <li>连接后会出现一步「<b>Erase device</b>」询问：<b>保持不勾选</b>再点「Next」，设置与阅读进度都保留；勾选会整片擦除。</li>
+    <li>使用<b>电脑</b>上的 Chrome 或 Edge（版本 89 及以上），并通过 <b>HTTPS</b> 或 <code>localhost</code> 打开本页。</li>
+    <li>数据线要能传数据；刷机过程中不要拔线、不要让电脑休眠。</li>
+    <li>连接后列表里找不到设备时，先在墨水屏上进入 <b>「设置 → 升级和恢复 → BOOT 刷机」</b>，再重新点上面的按钮。</li>
+    <li>同时打开串口工具会占用端口，请先关闭再刷机。</li>
+  </ul>
+
+  <h2>刷完之后</h2>
+  <ul>
+    <li>设备会自动重启到新的 Anki 版固件；只要没有勾选「Erase device」，原有设置与阅读进度都还在。</li>
+    <li>把 <code>.apkg</code> 放到 TF 卡的 <code>/anki/</code> 目录，在文件页直接打开即可开始复习。</li>
+    <li>需要回到原版固件：在「设置 → 升级和恢复」恢复出厂设置，或刷回官方完整包。</li>
+    <li>详细步骤见 <a href="https://github.com/cyankirin/kiikoreader-anki/blob/main/docs/anki-flash-guide.md" target="_blank" rel="noopener noreferrer">中文刷机说明 ↗</a>。</li>
+  </ul>
+
+  <footer>
+    kiikoread · Anki fork · 第三方阅读固件，非官方发布。
+    刷机包由本仓库的构建产物现场生成：发布前由 CI 逐项校验大小与 SHA-256（<code>tools/verify_flash_bundle.py</code>），
+    刷机时本页按 <code>manifest.json</code> 再逐个核对一遍，两次都通过才会写入设备。
+    这一步挡的是传输损坏、缓存里的旧文件与半截下载；清单与固件本身仍由本仓库发布，请确认你打开的是这个站点。
+  </footer>
+</main>
+
+<!--
+  中文：fail-closed 占位钩子。install-button.js 把 prepareManifest 当**可选**钩子
+        （`if (t.prepareManifest) prepared = await t.prepareManifest();`）：如果
+        ./integrity.js 因为 404 / MIME / 缓存 / CSP 没能加载，钩子是空的，安装器会直接
+        `port.open()` 写入**未校验**的字节，页面没有任何兜底。所以先用这个只能抛错的
+        占位函数把位置占住——模块加载成功后由下面的 module 覆盖成真正的校验函数；
+        模块没加载成功时，点「开始刷机」必然抛错，安装器 catch 后不会打开串口。
+  English: Fail-closed placeholder. install-button.js treats `prepareManifest` as optional
+        (`if (t.prepareManifest) prepared = await t.prepareManifest();`), so a 404, a wrong
+        MIME type, a stale cache entry or a CSP block on ./integrity.js would let the
+        installer open the port and write unverified bytes. This placeholder can only throw;
+        the module below replaces it with the real check when it loads. If it never loads,
+        clicking the button throws and the installer never opens the port.
+-->
+<script>
+  window.__ankiVerifyUnavailable = function ankiVerifyUnavailable() {
+    throw new Error('校验模块 integrity.js 未加载，已停止安装，设备未被写入；请刷新页面重试。');
+  };
+  (function guardAnkiInstallButton() {
+    function attachGuard() {
+      var button = document.querySelector('esp-web-install-button');
+      if (button && !button.prepareManifest) {
+        button.prepareManifest = window.__ankiVerifyUnavailable;
+      }
+    }
+    // 中文：现在先占位；元素升级成自定义元素后再补一次（避免升级过程丢掉这个自有属性）。
+    // English: Place it now, and again after the element upgrades (in case the upgrade drops
+    //          the own property).
+    attachGuard();
+    var registry = window.customElements;
+    if (registry && registry.whenDefined) {
+      registry.whenDefined('esp-web-install-button').then(attachGuard, function () {});
+    }
+  })();
+</script>
+<script type="module" src="../vendor/web/install-button.js"></script>
+<script type="module">
+  // 中文：给刷机按钮挂上「先校验、再开串口」的钩子（install-button.js 预留的 prepareManifest）。
+  //      钩子在 port.open() 之前执行：抛错则安装器直接中止，不打开串口、不擦除、不写入。
+  //      四个部件各下载一次，校验通过后以 blob: 交回安装器，因此不会重复下载固件。
+  // English: Attach the verify-before-open hook that install-button.js exposes as
+  //      `prepareManifest`. It runs before `port.open()`, so throwing aborts the install
+  //      without opening the port, erasing or writing. Each part is downloaded once and
+  //      handed back as blob: URLs, so the firmware is never fetched twice.
+  import { prepareBundle } from './integrity.js';
+
+  const supportStatus = document.getElementById('support-status');
+  const installButton = document.querySelector('esp-web-install-button');
+  if (installButton) {
+    installButton.prepareManifest = async function prepareManifest() {
+      supportStatus.textContent = '正在下载并逐项校验四个部件（SHA-256）…';
+      try {
+        const prepared = await prepareBundle(new URL('./manifest.json', document.baseURI).href);
+        supportStatus.textContent = '四个部件已逐项校验通过（SHA-256 与清单一致），开始写入 ' +
+          prepared.manifest.version + '。';
+        return prepared;
+      } catch (error) {
+        supportStatus.textContent = '校验未通过：' +
+          (error && error.message ? error.message : '未知错误') + ' 设备未被写入。';
+        throw error;
+      }
+    };
+  }
+</script>
+<script>
+  // 中文：版本与构建时间直接取自已校验的清单，避免页面与固件对不上。
+  // English: Read the version and build time from the verified manifest so the page cannot drift.
+  (function () {
+    var status = document.getElementById('support-status');
+    if (!window.isSecureContext) {
+      status.textContent = '当前不是 HTTPS 安全上下文，浏览器会拒绝访问串口。';
+    } else if (!('serial' in navigator)) {
+      status.textContent = '当前浏览器没有 WebSerial，请改用电脑上的 Chrome 或 Edge。';
+    }
+    fetch('./manifest.json', { cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (manifest) {
+        if (!manifest) { throw new Error('manifest'); }
+        document.getElementById('meta-version').textContent = manifest.version || '—';
+        var fork = manifest.anki_fork || {};
+        document.getElementById('meta-built').textContent =
+          fork.build_date && fork.build_time ? fork.build_date + ' ' + fork.build_time : '—';
+      })
+      .catch(function () {
+        document.getElementById('meta-version').textContent = '见下方清单';
+        document.getElementById('meta-built').textContent = '见下方清单';
+      });
+  })();
+</script>
+</body>
+</html>

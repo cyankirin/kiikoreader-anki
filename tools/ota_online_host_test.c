@@ -1,6 +1,16 @@
 /* SPDX-License-Identifier: Apache-2.0
  * 中文：真实 OTA 任务的断流、校验、取消、内存不足及与屏幕扫描的并发互斥。
- * English: Real OTA interruption, verification, cancellation, memory exhaustion and display/flash exclusion. */
+ * English: Real OTA interruption, verification, cancellation, memory exhaustion and display/flash exclusion.
+ *
+ * 选板方式 / How the board is chosen：rc103 起 OTA 任务源码按板存放，没有共享的
+ * main/ota_online.c。本文件按编译期宏 KIIKO_BOARD_METALIO47 选用板级实现，
+ * 由 tools/run_ota_host_tests.sh 显式传入 -DKIIKO_BOARD_METALIO47=0|1（缺省为 0，
+ * 即 Pico）。两块板的实现在宿主上都能独立编译。
+ * / Since rc103 the OTA worker lives per board, with no shared main/ota_online.c.
+ * This test picks the board implementation with the compile-time macro
+ * KIIKO_BOARD_METALIO47, which tools/run_ota_host_tests.sh passes explicitly
+ * (-DKIIKO_BOARD_METALIO47=0|1, defaulting to 0 = Pico). Both implementations
+ * compile standalone on the host. */
 #include "common.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -8,7 +18,11 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <sched.h>
-#include "../main/ota_online.c"
+#if KIIKO_BOARD_METALIO47
+#include "../boards/metalio47/src/main/ota_online.c"
+#else
+#include "../boards/pico/src/main/ota_online.c"
+#endif
 #if KIIKO_BOARD_METALIO47
 #define TEST_SLOT_SIZE 0x500000
 #define TEST_SLOT_1 0x510000

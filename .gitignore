@@ -54,6 +54,15 @@ tools/buzzer_score_wav
 !/flash/firmware.bin
 !/flash/ota_data_initial.bin
 !/flash/Pico-update*.bin
+# Anki 分支发布的应用分区固件（供 Flash Download Tool 烧到 0x10000）
+# App-partition firmware published with the Anki fork (flash at 0x10000).
+!/firmware/*.bin
+# 网页刷机用的三个基础部件（bootloader / 分区表 / otadata）：CI 没有构建产物，
+# 但必须与本地验证过的字节完全一致，所以单独入库一份。
+# / The three base parts for web flashing (bootloader / partitions / otadata). CI has no
+#   build output, yet the published bytes must equal the locally verified ones, so this
+#   one copy is tracked. `!/firmware/*.bin` does not cross directories.
+!/firmware/anki-base/*.bin
 !/flash/releases/*/bootloader.bin
 !/flash/releases/*/partitions.bin
 !/flash/releases/*/ota_data_initial.bin
@@ -113,16 +122,45 @@ Desktop.ini
 *.suo       # Visual Studio Solution User Options
 *.sln.docstates # Visual Studio
 
-# Official binaries live in Releases; local packages are hydrated for website builds.
-/flash/firmware.bin
-/flash/bootloader.bin
-/flash/partitions.bin
-/flash/ota_data_initial.bin
-/flash/Pico-update.bin
-/flash/Pico-update-*.bin
+# 历史上这里曾用 /flash/firmware.bin、/flash/Pico-update-*.bin 等排除「官网构建时
+# 临时下载」的产物（上游认为正式 Bin 只放 Releases）。但本 fork 直接把固件包发布
+# 在 flash/ 下，且上面的 !/flash/... 白名单在 git 里「最后匹配优先」——这些补丁式
+# 忽略会反过来盖掉白名单，让新的 flash/Pico-update-*.bin 必须 add -f 才能入库。
+# 因此这里不再忽略，改为在白名单侧一次性放行站点发布物。
+# / These lines used to exclude artifacts hydrated for website builds (upstream keeps
+# official binaries in Releases only). This fork publishes its bundles under flash/,
+# and git applies the LAST matching pattern — so those ignores overrode the
+# !/flash/... whitelists above and forced git add -f for a new
+# flash/Pico-update-*.bin. Nothing is ignored here any more; the whitelists below
+# allow the published site artifacts in one place.
+!/flash/*.bin
+!/flash/releases/*/*.bin
 
-# Public website is maintained in read-pico-reader; this private repo carries firmware.
-/flash/
-/build-*/
+!flash/metalio/releases/*/bootloader.bin
+!flash/metalio/releases/*/partitions.bin
+!flash/metalio/releases/*/ota_data_initial.bin
+# 网页刷机入口 /anki/ 的清单与 bin 是构建产物：manifest 里每个部件都记着 size 与
+# sha256，每次构建都会变；入库会与真正发布的字节脱轨（rc103.01 就踩过版本化副本
+# 没刷新的坑）。因此由 CI 在部署前用 tools/stage_anki_flash.py 现场生成，只把页面
+# index.html 与浏览器端校验模块 integrity.js 入库。
+# / The /anki/ manifest and binaries are build products: every part's size and SHA-256
+#   inside the manifest changes with each build, and a committed copy drifts away from
+#   the bytes that are actually deployed (the rc103.01 stale versioned copy did exactly
+#   that). CI regenerates them with tools/stage_anki_flash.py before deploying; only the
+#   page itself (index.html) and its browser-side verifier (integrity.js) are tracked.
+/flash/anki/*.bin
+/flash/anki/manifest.json
+sdkconfig.bak*
+sdkconfig.bak-*
+# 每块板各一份 sdkconfig（board.cmake 里写的是 sdkconfig.<board>）。
+# / One sdkconfig per board; board.cmake points at sdkconfig.<board>.
 /sdkconfig.pico
 /sdkconfig.metalio47
+/build-*/
+# 注意：上游在私有构建仓库里用 /flash/ 忽略整个站点；本 fork 在 flash/ 下发布
+# 固件包，已在上方用 !/flash/... 白名单逐条放行。整目录忽略会让白名单全部失效
+# （git 不会在已排除的目录里再包含文件），故此处不采用该行。
+# Note: upstream's private build repo ignores the whole /flash/ site. This fork
+# publishes firmware bundles under flash/ and whitelists them file by file
+# above; excluding the directory would void every one of those negations (git
+# never re-includes inside an excluded directory), so that line is not taken.

@@ -48,6 +48,9 @@ bool book_store_flash_ready(void);
 /// 失败不声称文件已删。
 /// Rejects traversal, directories, links and non-book extensions; clear a matching regular
 /// replacement backup first, restore backup-only files before deletion, and report failures as not removed.
+/// 按需挂载内置存储分区（幂等）；失败不影响可用 SD。卡组存储复用同一挂载。
+/// Mount the internal storage partition on demand (idempotent); failure leaves usable SD alone. Deck storage reuses this mount.
+esp_err_t book_store_ensure_flash(void);
 /// removed 为文件已删或已不存在；此时 NVS 仍可能失败，可再次调用清理。调用方负责关闭句柄及通知版本。
 /// removed means deleted or already absent; NVS may still fail and cleanup can be retried. Caller closes handles and notifies revision.
 esp_err_t book_store_delete(const char* path, bool* removed);

@@ -11,9 +11,10 @@ import re
 import sys
 from urllib.parse import urlparse
 
-from verify_flash_bundle import check, check_archived_releases
+from verify_flash_bundle import check, check_archived_releases, check_anki_bundle
 from release_assets import hydrate
 from metalio_release_assets import stage_metalio
+from stage_anki_flash import stage as stage_anki, verify as verify_anki
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,10 +55,29 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     if versioned.is_file(): shutil.copy2(versioned, output / versioned.name)
     hydrate(FLASH, output)
     stage_metalio(FLASH, output)
+    # 中文：本 fork 的 Anki 版入口（/anki/）。清单与 bin 每次现场生成：优先用本次构建的
+    #      包，没有构建包时用上面已校验过的站点镜像做基础部件、用 firmware/ 里入库的应用
+    #      镜像，因此版本库中不需要保存重复的二进制。生成后仍要过两道校验才允许发布。
+    # English: This fork's Anki entry (/anki/). The manifest and binaries are generated on
+    #      every run: from this build's package when present, otherwise from the verified
+    #      staging image (base parts) plus the committed app image in firmware/. Nothing
+    #      duplicated has to live in git, and two verifiers gate the result.
+    if (FLASH / "anki" / "index.html").is_file():
+        anki_output = output / "anki"
+        anki_output.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(FLASH / "anki" / "index.html", anki_output / "index.html")
+        # 中文：页面用相对路径 import 浏览器端校验模块，必须一起发布，否则刷机按钮
+        #      点下去只会报错（下面 stage_anki 的闸门也会拦）。
+        # English: The page imports its browser-side verifier by relative path, so it has to
+        #      be published too; without it the install button can only fail.
+        shutil.copy2(FLASH / "anki" / "integrity.js", anki_output / "integrity.js")
+        stage_anki(anki_output, base_dir=output)
+        verify_anki(anki_output)
+        check_anki_bundle(anki_output)
     # 保留已发布版本的固定下载地址，避免旧清单缓存或正在进行的更新突然遇到 404。
     # Keep immutable published URLs so cached manifests and in-flight updates do not suddenly get a 404.
     for upgrade in FLASH.glob("Pico-update-*.bin"):
-        name = re.fullmatch(r"Pico-update-(\d+\.\d+\.\d+(?:-rc\d+)?)\.bin", upgrade.name)
+        name = re.fullmatch(r"Pico-update-(\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?)\.bin", upgrade.name)
         if not name: continue
         with upgrade.open("rb") as source:
             header = source.read(112)
@@ -106,7 +126,12 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     shutil.copy2(ROOT / "LICENSE", output / "LICENSE")
     (output / ".nojekyll").touch()
 
-    for page in ("index.html", "notices.html", "manual.html", "manual/index.html", "metalio/index.html"):
+    # 中文：/anki/ 只在本次暂存过时才检查，避免上游没有该入口时误报。
+    # English: Only inspect /anki/ when it was staged, so upstream checkouts stay valid.
+    pages = ["index.html", "notices.html", "manual.html", "manual/index.html", "metalio/index.html"]
+    if (output / "anki" / "index.html").is_file():
+        pages.append("anki/index.html")
+    for page in pages:
         links = LocalLinks()
         links.feed((output / page).read_text(encoding="utf-8"))
         for link in links.links:

@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - flash/index.html
+      - flash/anki/**
       - flash/notices.html
       - flash/manual.html
       - flash/manual/**
@@ -32,6 +33,7 @@ on:
       - flash/update.json
       - flash/Pico-update*.bin
       - flash/firmware.bin
+      - firmware/**
       - flash/ota_data_initial.bin
       - flash/bootloader.bin
       - flash/partitions.bin
@@ -43,6 +45,7 @@ on:
       - tools/release_assets.py
       - flash/release-assets.json
       - tools/stage_public_flash.py
+      - tools/stage_anki_flash.py
       - tools/verify_flash_bundle.py
       - tools/package_flash.py
       - .github/workflows/pages.yml
@@ -71,6 +74,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate and stage public flashing files
         run: python3 tools/stage_public_flash.py _site
+      # 中文：暂存会现场生成 /anki/ 的清单与 bin，这里再用 --check 复核一遍结果。
+      # English: Staging generates the /anki/ manifest and binaries; re-check the result.
+      - name: Re-check the Anki web-flash bundle
+        run: python3 tools/stage_anki_flash.py _site/anki --check
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
