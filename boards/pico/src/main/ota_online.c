@@ -30,6 +30,7 @@ static SemaphoreHandle_t s_mutex, s_done, s_flash_display;
 static pico_update_status_t *s_status;
 static atomic_bool s_cancel;
 static bool s_joinable, s_download;
+static pico_ota_channel_t s_channel;
 static const esp_partition_t *s_verified;
 
 static bool initialize(void) {
@@ -214,9 +215,16 @@ static bool check_feed(void) {
     if (!json || !release) { state(PICO_UPDATE_FAILED, "内存不足，请退出传书后重试"); goto failed; }
     // GitHub Pages清单优先，官网清单备用；同一缓冲区顺序请求，无并发TLS连接。
     // Prefer GitHub Pages metadata, falling back to the website with one shared buffer and no concurrent TLS clients.
-    static const char *const feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
+    // 中文：Anki 版只读本 fork 的 Pages 清单，没有备用源；官方通道的清单源与顺序完全不变。
+    // English: The Anki channel reads this fork's Pages manifest only; the official channel keeps its feed order.
+    static const char *const official_feeds[] = {PICO_OTA_FEED_URL, PICO_OTA_FEED_FALLBACK_URL};
+    static const char *const anki_feeds[] = {PICO_OTA_ANKI_FEED_URL};
+    const bool anki = s_channel == PICO_OTA_CHANNEL_ANKI;
+    const char *const *feeds = anki ? anki_feeds : official_feeds;
+    const size_t feed_count = anki ? sizeof(anki_feeds) / sizeof(anki_feeds[0])
+                                   : sizeof(official_feeds) / sizeof(official_feeds[0]);
     bool valid = false;
-    for (size_t source = 0; source < sizeof(feeds) / sizeof(feeds[0]) && !atomic_load(&s_cancel); ++source) {
+    for (size_t source = 0; source < feed_count && !atomic_load(&s_cancel); ++source) {
         char url[192]; snprintf(url, sizeof(url), "%s?t=%lld", feeds[source], (long long)time(NULL));
         int code = -1; int64_t length = -1;
         esp_http_client_handle_t client = NULL;
@@ -237,7 +245,11 @@ static bool check_feed(void) {
         json[received] = 0;
         if (n >= 0 && complete && pico_release_parse(json, received, release) == ESP_OK) { valid = true; break; }
     }
-    if (!valid) { state(PICO_UPDATE_FAILED, "更新服务器连接失败或清单无效，请稍后重试"); goto failed; }
+    if (!valid) {
+        state(PICO_UPDATE_FAILED, anki ? "Anki 版清单获取失败，请稍后重试"
+                                      : "更新服务器连接失败或清单无效，请稍后重试");
+        goto failed;
+    }
     const esp_app_desc_t *running = esp_app_get_description();
     if (strcmp(release->project, running->project_name) || !layout_valid() ||
         pico_version_compare(running->version, release->minimum_base_version) < 0) {
@@ -378,11 +390,13 @@ static void worker(void *unused) {
     xSemaphoreGive(s_done);
     vTaskDelete(NULL);
 }
-static esp_err_t start(bool downloading) {
+static esp_err_t start(bool downloading, pico_ota_channel_t channel) {
     if (!initialize()) return ESP_ERR_NO_MEM;
+    if (channel != PICO_OTA_CHANNEL_OFFICIAL && channel != PICO_OTA_CHANNEL_ANKI)
+        return ESP_ERR_INVALID_ARG;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     bool busy = s_status->busy;
-    bool available = s_status->state == PICO_UPDATE_AVAILABLE;
+    bool available = s_status->state == PICO_UPDATE_AVAILABLE && s_status->channel == channel;
     xSemaphoreGive(s_mutex);
     if (busy || (downloading && !available)) return ESP_ERR_INVALID_STATE;
     if (s_joinable) { xSemaphoreTake(s_done, portMAX_DELAY); s_joinable = false; }
@@ -391,12 +405,14 @@ static esp_err_t start(bool downloading) {
         return ESP_ERR_NO_MEM;
     }
     atomic_store(&s_cancel, false);
-    s_download = downloading; s_verified = NULL;
+    s_download = downloading; s_verified = NULL; s_channel = channel;
     xSemaphoreTake(s_mutex, portMAX_DELAY);
-    s_status->busy = true; s_status->received = 0;
+    s_status->busy = true; s_status->received = 0; s_status->channel = channel;
     xSemaphoreGive(s_mutex);
+    const bool anki = channel == PICO_OTA_CHANNEL_ANKI;
     state(downloading ? PICO_UPDATE_DOWNLOADING : PICO_UPDATE_CHECKING,
-          downloading ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
+          downloading ? (anki ? "正在下载 Anki 版，短暂断网会自动重连" : "正在下载，短暂断网会自动重连")
+                      : (anki ? "正在连接并检查 Anki 版更新" : "正在连接并检查更新"));
     if (xTaskCreate(worker, "kiikoread_ota", 12288, NULL, 4, NULL) != pdPASS) {
         xSemaphoreTake(s_mutex, portMAX_DELAY); s_status->busy = false; xSemaphoreGive(s_mutex);
         state(PICO_UPDATE_FAILED, "内存不足，无法开始升级"); return ESP_ERR_NO_MEM;
@@ -404,8 +420,10 @@ static esp_err_t start(bool downloading) {
     s_joinable = true;
     return ESP_OK;
 }
-esp_err_t pico_online_check(void) { return start(false); }
-esp_err_t pico_online_download(void) { return start(true); }
+esp_err_t pico_online_check(void) { return start(false, PICO_OTA_CHANNEL_OFFICIAL); }
+esp_err_t pico_online_download(void) { return start(true, PICO_OTA_CHANNEL_OFFICIAL); }
+esp_err_t pico_online_check_channel(pico_ota_channel_t channel) { return start(false, channel); }
+esp_err_t pico_online_download_channel(pico_ota_channel_t channel) { return start(true, channel); }
 void pico_online_cancel_join(void) {
     if (s_joinable) {
         atomic_store(&s_cancel, true);

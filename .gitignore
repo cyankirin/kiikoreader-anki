@@ -150,6 +150,11 @@ Desktop.ini
 #   page itself (index.html) and its browser-side verifier (integrity.js) are tracked.
 /flash/anki/*.bin
 /flash/anki/manifest.json
+# 可回退版本的整包同样是构建产物（每版四件套由 firmware/ 里入库的镜像现场生成）：
+# 只把版本目录 flash/anki/releases.json 入库，releases/ 下的 bin 与 manifest 由部署生成。
+# The rollback bundles are build products too (each is generated from the committed
+# firmware/ images); only the catalog flash/anki/releases.json is tracked.
+/flash/anki/releases/
 sdkconfig.bak*
 sdkconfig.bak-*
 # 每块板各一份 sdkconfig（board.cmake 里写的是 sdkconfig.<board>）。

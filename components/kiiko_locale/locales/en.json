@@ -1185,5 +1185,20 @@
   "删除书籍": "Delete books",
   "搜索书籍": "Search books",
   "清理进度": "Clear progress",
-  "脚注": "Footnote"
+  "脚注": "Footnote",
+  "Anki 学习": "Anki study",
+  "内存紧张，首页组件已暂停": "Low memory: home widgets paused",
+  "官方版": "Official",
+  "Anki 版": "Anki build",
+  "Anki 版联网升级": "Anki build OTA",
+  "检查中…": "Checking…",
+  "可安装新版本": "Update ready",
+  "已是最新": "Up to date",
+  "下载中": "Downloading",
+  "已就绪": "Ready",
+  "重试": "Retry",
+  "选择通道，连上 WiFi 后检查新版本": "Pick a channel, connect Wi-Fi, then check for updates",
+  "正在下载 Anki 版，短暂断网会自动重连": "Downloading the Anki build; a short drop reconnects automatically",
+  "正在连接并检查 Anki 版更新": "Connecting and checking the Anki build",
+  "Anki 版清单获取失败，请稍后重试": "Anki build manifest unavailable; try again later"
 }

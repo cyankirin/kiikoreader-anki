@@ -66,7 +66,10 @@ bool pico_release_url_valid(const char *url) {
     // 升级源限定官方 HTTPS 站点，避免重定向泄漏或被替换为任意下载源。
     // Limit updates to the official HTTPS origin; do not follow arbitrary redirects.
     static const char *const prefixes[] = {
-        "https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/"
+        "https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/",
+        // 中文：本 fork 的 Anki 版镜像站点（站点根、扁平文件名）只是多一个来源，其余规则不变。
+        // English: This fork's Anki mirror (site root, flat name) is one more origin; every other rule stands.
+        "https://cyankirin.github.io/kiikoreader-anki/"
     };
     if (!url || strlen(url) >= 256) return false;
     const char *name = NULL;

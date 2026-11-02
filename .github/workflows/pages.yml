@@ -31,6 +31,8 @@ on:
       - flash/metalio-native-stub.js
       - tools/metalio_release_assets.py
       - flash/update.json
+      - main/ota_online.h
+      - boards/pico/board.json
       - flash/Pico-update*.bin
       - flash/firmware.bin
       - firmware/**
@@ -77,7 +79,7 @@ jobs:
       # 中文：暂存会现场生成 /anki/ 的清单与 bin，这里再用 --check 复核一遍结果。
       # English: Staging generates the /anki/ manifest and binaries; re-check the result.
       - name: Re-check the Anki web-flash bundle
-        run: python3 tools/stage_anki_flash.py _site/anki --check
+        run: python3 tools/stage_anki_flash.py _site/anki --check --ota-dir _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

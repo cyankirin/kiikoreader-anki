@@ -28,7 +28,17 @@
 #define PICO_OTA_CAPABILITY "PICO_HTTPS_OTA_V1"
 #define PICO_OTA_FEED_URL "https://wegooo-cell.github.io/read-pico-reader/update.json"
 #define PICO_OTA_FEED_FALLBACK_URL "https://kiikoread.com/update.json"
+// 中文：Anki 版清单走本 fork 的 Pages 镜像；官方清单常量原样保留，互不影响。
+// English: The Anki manifest lives on this fork's Pages mirror; the official constants stay untouched.
+#define PICO_OTA_ANKI_FEED_URL "https://cyankirin.github.io/kiikoreader-anki/anki-update.json"
 #endif
+
+// 中文：升级通道。官方通道完全沿用原有清单源与行为；Anki 通道只读本 fork 的清单，
+//       两者共用同一套解析、校验、写入与提交路径。
+// English: Update channels. The official channel keeps its original feed and behaviour; the
+//          Anki channel reads this fork's manifest only. Both share parsing, verification,
+//          writing and commit.
+typedef enum { PICO_OTA_CHANNEL_OFFICIAL = 0, PICO_OTA_CHANNEL_ANKI = 1 } pico_ota_channel_t;
 
 typedef enum { PICO_UPDATE_IDLE, PICO_UPDATE_CHECKING, PICO_UPDATE_AVAILABLE,
                PICO_UPDATE_LATEST, PICO_UPDATE_DOWNLOADING, PICO_UPDATE_READY,
@@ -44,6 +54,9 @@ typedef struct {
     uint32_t revision, received;
     char message[96];
     bool busy;
+    // 中文：当前状态所属的通道，界面据此区分「官方版 / Anki 版」。
+    // English: Channel the current status belongs to; the UI names it as official or Anki.
+    pico_ota_channel_t channel;
 } pico_update_status_t;
 
 /// 有界解析、型号与版本验证；不接触网络。/ Bounded parsing, board and version validation without networking.
@@ -53,6 +66,12 @@ bool pico_release_url_valid(const char *url);
 /// 检查或下载唯一后台任务；离页、锁屏先取消并等待。/ Start one worker; cancel and join on exit or lock.
 esp_err_t pico_online_check(void);
 esp_err_t pico_online_download(void);
+#if !KIIKO_BOARD_METALIO47
+/// 中文：按通道检查/下载；官方通道与 pico_online_check()/pico_online_download() 等价。
+/// English: Check/download on a chosen channel; the official channel equals the plain calls.
+esp_err_t pico_online_check_channel(pico_ota_channel_t channel);
+esp_err_t pico_online_download_channel(pico_ota_channel_t channel);
+#endif
 bool pico_online_busy(void);
 void pico_online_get_status(pico_update_status_t *status);
 void pico_online_cancel_join(void);

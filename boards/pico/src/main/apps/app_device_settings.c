@@ -185,9 +185,48 @@ static bool s_update_drawn_busy, s_upgrade_offer_pending;
 typedef enum { UPGRADE_JOB_NONE, UPGRADE_JOB_CHECK, UPGRADE_JOB_DOWNLOAD } upgrade_job_t;
 static upgrade_job_t s_upgrade_job;
 static int s_upgrade_bar_width;
+// 中文：本页正在操作的通道。官方通道是与旧界面完全一致的那一条；「Anki 版联网升级」是新增
+//       入口，两者共用同一套清单解析、下载、校验与提交路径，只换清单来源。
+// English: The channel this page is working on. "Official" is the unchanged entry; "Anki
+//          build OTA" is the added one. Both share the same parsing, download, verification
+//          and commit path and differ only in the manifest source.
+static pico_ota_channel_t s_upgrade_channel = PICO_OTA_CHANNEL_OFFICIAL;
+static const char *upgrade_channel_name(pico_ota_channel_t channel) {
+    return channel == PICO_OTA_CHANNEL_ANKI ? "Anki 版" : "官方版";
+}
+// 两行入口各占七十像素；行本身就是按钮，点一次就开始检查该通道。
+// Each entry row is 70 px tall and is the button: one tap checks that channel.
+static EpdRect upgrade_channel_row(pico_ota_channel_t channel) {
+    return (EpdRect){52, channel == PICO_OTA_CHANNEL_ANKI ? 500 : 424, 580, 70};
+}
+static EpdRect upgrade_bar_rect(void) {
+    EpdRect row = upgrade_channel_row(s_update.channel);
+    return (EpdRect){row.x + 20, row.y + row.height - 18, row.width - 40, 4};
+}
+static EpdRect upgrade_percent_rect(void) {
+    EpdRect row = upgrade_channel_row(s_update.channel);
+    return (EpdRect){row.x + row.width - 112, row.y + 11, 96, 32};
+}
 static uint32_t upgrade_percent(void) {
     uint32_t percent = s_update.release.size ? (uint64_t)s_update.received * 100 / s_update.release.size : 0;
     return percent > 100 ? 100 : percent;
+}
+static int upgrade_bar_width(void) {
+    return (int)((int64_t)upgrade_bar_rect().width * upgrade_percent() / 100);
+}
+// 行右侧提示：只有状态所属通道才显示真实进度，另一行始终提示「检查更新」。
+// The row hint shows real state only for the channel the status belongs to; the other row offers a check.
+static const char *upgrade_channel_hint(pico_ota_channel_t channel) {
+    if (s_update.channel != channel) return "检查更新";
+    switch (s_update.state) {
+        case PICO_UPDATE_CHECKING: return "检查中…";
+        case PICO_UPDATE_AVAILABLE: return "可安装新版本";
+        case PICO_UPDATE_LATEST: return "已是最新";
+        case PICO_UPDATE_DOWNLOADING: return "下载中";
+        case PICO_UPDATE_READY: return "已就绪";
+        case PICO_UPDATE_FAILED: return "重试";
+        default: return "检查更新";
+    }
 }
 static void upgrade_remember(uint32_t now) {
     s_update_drawn_state = s_update.state;
@@ -217,40 +256,65 @@ static app_redraw_t upgrade_status_redraw(uint32_t now) {
     }
     return APP_REDRAW_NONE;
 }
-static EpdRect upgrade_progress_area(void) { return (EpdRect){52, 468, 580, 64}; }
 static void draw_upgrade_percent(uint8_t *fb) {
-    uint32_t percent = upgrade_percent();
-    EpdRect number = {496, 472, 132, 42};
+    EpdRect number = upgrade_percent_rect();
     ui_fill_rect_fast(number, UI_GRAY_WHITE, fb);
-    char progress[32]; snprintf(progress, sizeof(progress), "%lu%%", (unsigned long)percent);
-    ui_text_fixed(fb, 624, 477, 26, progress, EPD_DRAW_ALIGN_RIGHT, false);
+    char progress[32]; snprintf(progress, sizeof(progress), "%lu%%", (unsigned long)upgrade_percent());
+    ui_text_fixed(fb, number.x + number.width - 6, number.y + 3, 24, progress, EPD_DRAW_ALIGN_RIGHT, false);
     ui_image_bw_rect(fb, number);
 }
+// 中文：两行通道入口。状态所属的那一行高亮；下载中在行内显示百分比与细进度条。
+// English: Two channel rows. The row owning the status is highlighted; a download shows its
+//          percentage and a thin bar inside that row.
+static void draw_upgrade_channels(uint8_t *fb) {
+    for (int index = 0; index < 2; ++index) {
+        const pico_ota_channel_t channel = index ? PICO_OTA_CHANNEL_ANKI : PICO_OTA_CHANNEL_OFFICIAL;
+        const EpdRect row = upgrade_channel_row(channel);
+        const bool current = s_update.channel == channel && s_update.state != PICO_UPDATE_IDLE;
+        const bool downloading = current && s_update.state == PICO_UPDATE_DOWNLOADING;
+        settings_card(fb, row, 18, current ? 0xd0 : UI_GRAY_WHITE, 0x70);
+        ui_text_vc(fb, row.x + 26, row.y + row.height / 2 - (downloading ? 8 : 0), 27,
+                   index ? "Anki 版联网升级" : "官方版", EPD_DRAW_ALIGN_LEFT, false);
+        if (downloading) {
+            EpdRect bar = upgrade_bar_rect();
+            draw_upgrade_percent(fb);
+            ui_fill_rect_fast(bar, UI_GRAY_WHITE, fb);
+            if (s_upgrade_bar_width > 0)
+                ui_fill_rect_fast((EpdRect){bar.x, bar.y, s_upgrade_bar_width, bar.height}, UI_GRAY_BLACK, fb);
+        } else {
+            ui_text_fixed(fb, row.x + row.width - 22, row.y + 24, 22,
+                          upgrade_channel_hint(channel), EPD_DRAW_ALIGN_RIGHT, false);
+        }
+    }
+}
+static EpdRect upgrade_progress_area(void) { return (EpdRect){48, 424, 588, 148}; }
 static void draw_upgrade_progress(uint8_t *fb) {
     ui_fill_rect_fast(upgrade_progress_area(), UI_GRAY_WHITE, fb);
-    draw_upgrade_percent(fb);
-    ui_fill_rect_fast((EpdRect){60, 518, 564, 10}, UI_GRAY_BLACK, fb);
-    ui_fill_rect_fast((EpdRect){61, 519, 562, 8}, UI_GRAY_WHITE, fb);
-    s_upgrade_bar_width = (int)(562 * upgrade_percent() / 100);
-    if (s_upgrade_bar_width)
-        ui_fill_rect_fast((EpdRect){61, 519, s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+    s_upgrade_bar_width = upgrade_bar_width();
+    draw_upgrade_channels(fb);
 }
 static void draw_upgrade_progress_delta(uint8_t *fb) {
-    int width = (int)(562 * upgrade_percent() / 100);
+    int width = upgrade_bar_width();
     if (width <= s_upgrade_bar_width) return;
+    EpdRect bar = upgrade_bar_rect();
     draw_upgrade_percent(fb);
-    ui_fill_rect_fast((EpdRect){61 + s_upgrade_bar_width, 519, width - s_upgrade_bar_width, 8}, UI_GRAY_BLACK, fb);
+    ui_fill_rect_fast((EpdRect){bar.x + s_upgrade_bar_width, bar.y, width - s_upgrade_bar_width, bar.height},
+                      UI_GRAY_BLACK, fb);
     s_upgrade_bar_width = width;
 }
 // 排队时只改 UI 快照；本次画面推送结束后的 tick 才启动 TLS/擦写。
 // Scheduling changes only the UI snapshot; start TLS/flash on the tick after its presentation.
-static void upgrade_schedule(bool downloading, uint32_t now) {
+static void upgrade_schedule(bool downloading, pico_ota_channel_t channel, uint32_t now) {
+    const bool anki = channel == PICO_OTA_CHANNEL_ANKI;
+    s_upgrade_channel = channel;
     s_upgrade_job = downloading ? UPGRADE_JOB_DOWNLOAD : UPGRADE_JOB_CHECK;
+    s_update.channel = channel;
     s_update.state = downloading ? PICO_UPDATE_DOWNLOADING : PICO_UPDATE_CHECKING;
     s_update.busy = true;
     s_update.received = 0;
     snprintf(s_update.message, sizeof(s_update.message), "%s", downloading
-        ? "正在下载，短暂断网会自动重连" : "正在连接并检查更新");
+        ? (anki ? "正在下载 Anki 版，短暂断网会自动重连" : "正在下载，短暂断网会自动重连")
+        : (anki ? "正在连接并检查 Anki 版更新" : "正在连接并检查更新"));
     s_upgrade_offer_pending = !downloading;
     upgrade_remember(now);
 }
@@ -259,7 +323,8 @@ static app_redraw_t upgrade_start_pending(void) {
     s_upgrade_job = UPGRADE_JOB_NONE;
     app_home_cover_mode_changed();
     app_book_cover_mode_changed();
-    esp_err_t error = downloading ? pico_online_download() : pico_online_check();
+    esp_err_t error = downloading ? pico_online_download_channel(s_upgrade_channel)
+                                  : pico_online_check_channel(s_upgrade_channel);
     pico_online_get_status(&s_update);
     if (error == ESP_OK) return APP_REDRAW_NONE;
     s_upgrade_offer_pending = false;
@@ -317,6 +382,7 @@ static EpdRect upgrade_confirm_button(bool online, bool accept) {
 static void upgrade_open(void) {
     (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);
     pico_online_get_status(&s_update);
+    s_upgrade_channel = s_update.channel;
     s_upgrade_confirm = s_local_pending = s_upgrade_restart = false;
     s_upgrade_offer_pending = false;
     s_upgrade_job = UPGRADE_JOB_NONE;
@@ -324,6 +390,27 @@ static void upgrade_open(void) {
     upgrade_remember(esp_timer_get_time() / 1000);
     s_upgrade_notice[0] = 0;
     s_page = SETTINGS_UPGRADE;
+}
+// 点哪一行就操作哪个通道；另一通道正在运行时忽略这次点击，不打断它。
+// Tapping a row acts on that channel; a tap is ignored while the other channel is running.
+static app_redraw_t upgrade_channel_tap(pico_ota_channel_t channel) {
+    s_upgrade_notice[0] = 0;
+    pico_online_get_status(&s_update);
+    if (s_update.busy) {
+        if (s_update.channel != channel) return APP_REDRAW_NONE;
+        s_upgrade_job = UPGRADE_JOB_NONE;
+        s_upgrade_offer_pending = false;
+        pico_online_cancel_join();
+    } else if (s_update.channel == channel && s_update.state == PICO_UPDATE_AVAILABLE) {
+        s_upgrade_confirm = true;
+        s_upgrade_online = true;
+    } else {
+        upgrade_schedule(false, channel, esp_timer_get_time() / 1000);
+        return APP_REDRAW_PAGE;
+    }
+    pico_online_get_status(&s_update);
+    upgrade_remember(esp_timer_get_time() / 1000);
+    return APP_REDRAW_PAGE;
 }
 static const char *const TAG = "device_settings";
 // 主设置始终单行；大字号只改变字形，字体预览单独保留足够空间。
@@ -1274,6 +1361,10 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         if (s_upgrade_confirm) {
             settings_card(fb, (EpdRect){36, 356, 612, s_upgrade_online ? 574 : 344}, 22, UI_GRAY_WHITE, 0x70);
             ui_text_fixed(fb, 60, 383, 31, s_upgrade_online ? "发现新版本" : "确认 TF 卡升级", EPD_DRAW_ALIGN_LEFT, false);
+            // 中文：确认页右上角标出通道，避免把 Anki 版更新误当成官方更新。
+            // English: The confirm page names its channel so an Anki update is never mistaken for the official one.
+            if (s_upgrade_online)
+                ui_text_fixed(fb, 624, 392, 21, upgrade_channel_name(s_update.channel), EPD_DRAW_ALIGN_RIGHT, false);
             ui_text_fixed(fb, 60, 447, 28, s_upgrade_online ? s_update.release.version : s_local_update.candidate_version,
                     EPD_DRAW_ALIGN_LEFT, false);
             if (s_upgrade_online) {
@@ -1285,17 +1376,14 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_draw_button(fb, upgrade_confirm_button(s_upgrade_online, false), s_upgrade_online ? "稍后" : "取消", false);
             ui_draw_button(fb, upgrade_confirm_button(s_upgrade_online, true), s_upgrade_online ? "开始更新" : "确认升级", true);
         } else {
-            settings_card(fb, (EpdRect){36, 356, 612, 278}, 22, UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 60, 383, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
+            settings_card(fb, (EpdRect){36, 340, 612, 280}, 22, UI_GRAY_WHITE, 0x70);
+            ui_text(fb, 60, 362, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
             char detail[96];
-            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "连接 WiFi，检查官网发布的新版本");
+            snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "选择通道，连上 WiFi 后检查新版本");
             fit_value(detail, 540);
-            ui_text(fb, 60, 436, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
-            if (s_update.state == PICO_UPDATE_AVAILABLE)
-                ui_text(fb, 60, 477, 24, s_update.release.version, EPD_DRAW_ALIGN_LEFT, false);
+            ui_text(fb, 60, 400, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
-            ui_draw_button(fb, (EpdRect){60, 550, 564, 62}, s_update.busy ? "取消联网更新" :
-                s_update.state == PICO_UPDATE_AVAILABLE ? "开始更新" : "检查更新", s_update.state == PICO_UPDATE_AVAILABLE);
+            else draw_upgrade_channels(fb);
             settings_card(fb, (EpdRect){36, 662, 612, 262}, 22, UI_GRAY_WHITE, 0x70);
             ui_text(fb, 60, 689, 29, "TF 卡升级", EPD_DRAW_ALIGN_LEFT, false);
             ui_text(fb, 60, 739, 23, "升级包放在 TF 卡根目录", EPD_DRAW_ALIGN_LEFT, false);
@@ -1899,25 +1987,18 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 s_upgrade_offer_pending = false;
                 if (accept) {
                     if (s_upgrade_online) {
-                        upgrade_schedule(true, esp_timer_get_time() / 1000);
+                        upgrade_schedule(true, s_update.channel, esp_timer_get_time() / 1000);
                     } else s_local_pending = true;
                 }
                 return APP_REDRAW_PAGE;
             }
             return APP_REDRAW_NONE;
         }
-        if (ev->x0 < 60 || ev->x0 >= 624) return APP_REDRAW_NONE;
-        if (y >= 550 && y < 612) {
-            s_upgrade_notice[0] = 0;
-            if (s_update.busy) { s_upgrade_job = UPGRADE_JOB_NONE; s_upgrade_offer_pending = false; pico_online_cancel_join(); }
-            else if (s_update.state == PICO_UPDATE_AVAILABLE) { s_upgrade_confirm = true; s_upgrade_online = true; }
-            else {
-                upgrade_schedule(false, esp_timer_get_time() / 1000);
-                return APP_REDRAW_PAGE;
-            }
-            pico_online_get_status(&s_update);
-            upgrade_remember(esp_timer_get_time() / 1000);
-            return APP_REDRAW_PAGE;
+        // 两行通道入口各自可点：官方版保持原行为，Anki 版是新增的联网升级通道。
+        // Each channel row is tappable: official keeps the old behaviour, Anki is the added channel.
+        for (int index = 0; index < 2; ++index) {
+            const pico_ota_channel_t channel = index ? PICO_OTA_CHANNEL_ANKI : PICO_OTA_CHANNEL_OFFICIAL;
+            if (ui_rect_hit(upgrade_channel_row(channel), ev->x0, y)) return upgrade_channel_tap(channel);
         }
         if (y >= 840 && y < 902 && !s_update.busy) {
             (void)pico_ota_inspect(PICO_OTA_UPDATE_PATH, &s_local_update);

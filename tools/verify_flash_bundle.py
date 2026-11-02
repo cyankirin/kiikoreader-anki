@@ -18,6 +18,41 @@ EXPECTED = {
     "ota_data_initial.bin": (0xD10000, 0xD12000),
 }
 
+# 中文：设备端 Anki 版 OTA 的站点路径。固件的 pico_release_url_valid() 只接受白名单前缀 +
+#      站点根下的扁平 `.bin`，所以镜像必须放在站点根，不能放子目录、不能走 GitHub Release。
+# English: Site layout for the device's Anki OTA channel. The firmware's
+#      pico_release_url_valid() accepts only allowlisted prefixes plus a flat `.bin` at the
+#      site root, so the image cannot live in a subdirectory or behind a GitHub Release.
+ANKI_OTA_PREFIX = "https://cyankirin.github.io/kiikoreader-anki/"
+ANKI_OTA_MANIFEST = "anki-update.json"
+ANKI_OTA_BOARD = "RDP-G01-W"
+ANKI_OTA_LAYOUT = "pico-dual-4m-v1"
+ANKI_OTA_MINIMUM_BASE = "0.3.3-rc72"
+ANKI_OTA_NOTES_MAX = 383          # char notes[384] on the device
+ANKI_OTA_IMAGE_MAX = 0x400000     # PICO_OTA_IMAGE_MAX for the pico layout
+
+
+def release_url_valid(url: str) -> bool:
+    """Mirror `pico_release_url_valid()` in main/ota_release.c.
+
+    中文：白名单前缀 + 站点根下的扁平 `.bin`（不含 `/`、`..`、反斜杠，字符集
+          `[A-Za-z0-9._-]`，长度 < 256）。产出与发布两侧都跑这一条，线上不会出现设备
+          必然拒绝的 URL。
+    English: Allowlisted prefix plus a flat `.bin` at the site root (no `/`, no `..`, no
+          backslash, charset `[A-Za-z0-9._-]`, shorter than 256 bytes). Both the producer and
+          the deploy gate run this, so a URL the device would reject never goes live.
+    """
+    prefixes = ("https://kiikoread.com/", "https://wegooo-cell.github.io/read-pico-reader/",
+                ANKI_OTA_PREFIX)
+    if not url or len(url) >= 256:
+        return False
+    name = next((url[len(prefix):] for prefix in prefixes if url.startswith(prefix)), None)
+    if not name or ".." in name or "/" in name or "\\" in name:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        return False
+    return len(name) > 4 and name.endswith(".bin")
+
 
 def check_archived_releases(folder: Path, current_partitions: Path | None = None,
                             payload_folder: Path | None = None) -> list[dict]:
@@ -162,24 +197,13 @@ def _strip_comments(markup: str) -> str:
     return re.sub(r"(?m)^[ \t]*//.*$", "", without_blocks)
 
 
-def check_anki_bundle(folder: Path) -> dict:
-    """Validate the fork's Anki web-flash bundle: same layout, user data preserved.
+def _check_anki_parts(folder: Path, manifest: dict) -> str:
+    """Check one Anki bundle's manifest, bytes, layout and app identity; return its version.
 
-    中文：本 fork 的 Anki 版入口写同一套双槽布局，并且**必须**保留用户数据。注意
-         `new_install_prompt_erase` 的极性反直觉：`true` 才会先弹「Erase device?」询问页，
-         复选框默认不勾选 → 默认保留；`false` 是 install-dialog 里的「不询问、直接
-         `_startInstall(true)`」，也就是立即整片 chip erase。偏移、大小、哈希、分区表与
-         应用描述的校验与官网包同样严格。
-    English: The fork's Anki entry writes the same dual-slot layout and must preserve user
-         data. The `new_install_prompt_erase` polarity is counter-intuitive: `true` shows the
-         "Erase device?" step whose checkbox starts unchecked, so the default is to keep data;
-         `false` means install-dialog calls `_startInstall(true)` without asking, i.e. an
-         immediate full-chip erase. Every offset, size, hash, partition-table and
-         app-description check stays as strict as the official bundle.
+    中文：当前版本与可回退版本共用这一套检查，因此每个版本都必须独立过闸门。
+    English: The current bundle and every rollback bundle share this check, so each version
+          passes the gate on its own.
     """
-    manifest_path = folder / "manifest.json"
-    assert manifest_path.is_file(), "missing Anki flash manifest"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest.get("new_install_prompt_erase") is True, (
         "Anki bundle must set new_install_prompt_erase true (ask first, checkbox unchecked = "
         "keep data); false erases the whole chip without asking")
@@ -213,6 +237,28 @@ def check_anki_bundle(folder: Path) -> dict:
     project = image[80:112].split(b"\0")[0].decode("ascii")
     assert version == manifest["version"] and project == "Read_Pico", "bundle version mismatch"
     assert re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version), "invalid release version"
+    return version
+
+
+def check_anki_bundle(folder: Path) -> dict:
+    """Validate the fork's Anki web-flash bundle: same layout, user data preserved.
+
+    中文：本 fork 的 Anki 版入口写同一套双槽布局，并且**必须**保留用户数据。注意
+         `new_install_prompt_erase` 的极性反直觉：`true` 才会先弹「Erase device?」询问页，
+         复选框默认不勾选 → 默认保留；`false` 是 install-dialog 里的「不询问、直接
+         `_startInstall(true)`」，也就是立即整片 chip erase。偏移、大小、哈希、分区表与
+         应用描述的校验与官网包同样严格。
+    English: The fork's Anki entry writes the same dual-slot layout and must preserve user
+         data. The `new_install_prompt_erase` polarity is counter-intuitive: `true` shows the
+         "Erase device?" step whose checkbox starts unchecked, so the default is to keep data;
+         `false` means install-dialog calls `_startInstall(true)` without asking, i.e. an
+         immediate full-chip erase. Every offset, size, hash, partition-table and
+         app-description check stays as strict as the official bundle.
+    """
+    manifest_path = folder / "manifest.json"
+    assert manifest_path.is_file(), "missing Anki flash manifest"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    version = _check_anki_parts(folder, manifest)
     # 中文：页面承诺「刷机前逐个核对 SHA-256」，就必须真的挂上浏览器端校验：页面要加载
     #       integrity.js 并由它实现 prepareManifest，且校验模块里的偏移/容量不能与烧写计划漂移。
     # English: The page promises a per-part SHA-256 check before flashing, so it must actually
@@ -260,6 +306,48 @@ def check_anki_bundle(folder: Path) -> dict:
         print(f"anki/{name}: {len(data)} bytes, SHA256 {hashlib.sha256(data).hexdigest()}")
     print(f"Anki web bundle verified: {version} (data preserved, dual-slot layout unchanged)")
     return manifest
+
+
+def check_anki_ota(site: Path, anki: Path | None = None) -> dict:
+    """Validate the device OTA pair published at the site root.
+
+    中文：设备只接受站点根下的扁平 `.bin`，所以清单里的 url、清单本身的位置、以及那个 bin
+          必须三者一致；bin 还必须与 `/anki/` 里烧写的应用镜像**同字节**，否则同一版本
+          会出现「网页刷的」和「OTA 推的」两套固件。
+    English: The device only accepts a flat `.bin` at the site root, so the manifest's url,
+          the manifest's own location and that binary must agree. The binary must also be
+          byte-identical to the application image flashed from `/anki/`, or one version would
+          ship two different firmwares depending on the update path.
+    """
+    manifest_path = site / ANKI_OTA_MANIFEST
+    assert manifest_path.is_file(), f"missing the Anki OTA manifest at {manifest_path}"
+    feed = json.loads(manifest_path.read_text(encoding="utf-8"))
+    version = feed.get("version")
+    assert feed.get("schema") == 1, "OTA manifest schema must be 1"
+    assert isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version)
+    assert feed.get("project") == "Read_Pico", "OTA manifest project must be Read_Pico"
+    assert feed.get("board") == ANKI_OTA_BOARD, "OTA manifest board drifted"
+    assert feed.get("layout") == ANKI_OTA_LAYOUT, "OTA manifest layout drifted"
+    assert feed.get("minimum_base_version") == ANKI_OTA_MINIMUM_BASE, "minimum base version drifted"
+    assert feed.get("url") == f"{ANKI_OTA_PREFIX}Pico-anki-{version}.bin", (
+        "OTA url must be the flat site-root image name, not a Release or subdirectory URL")
+    assert release_url_valid(feed["url"]), "OTA url would be rejected by pico_release_url_valid()"
+    notes = feed.get("notes")
+    assert isinstance(notes, str) and notes, "OTA manifest needs notes"
+    assert len(notes.encode("utf-8")) <= ANKI_OTA_NOTES_MAX, "OTA notes overflow char notes[384]"
+    image = site / f"Pico-anki-{version}.bin"
+    assert image.is_file(), f"missing the OTA image at the site root: {image}"
+    data = image.read_bytes()
+    assert 288 <= len(data) <= ANKI_OTA_IMAGE_MAX, "OTA image does not fit the app slot"
+    assert feed.get("size") == len(data), "OTA manifest size does not match the site-root image"
+    assert feed.get("sha256") == hashlib.sha256(data).hexdigest(), (
+        "OTA manifest sha256 does not match the site-root image")
+    assert data[48:80].split(b"\0")[0].decode("ascii") == version, "OTA image version mismatch"
+    if anki is not None:
+        assert (anki / "firmware.bin").read_bytes() == data, (
+            "the OTA image and the /anki/ application image must be the same bytes")
+    print(f"Anki OTA feed verified: {version} -> {feed['url']}")
+    return feed
 
 
 if __name__ == "__main__":

@@ -21,13 +21,14 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import sys
 import tempfile
 from pathlib import Path
 
-from verify_flash_bundle import EXPECTED
+from verify_flash_bundle import EXPECTED, release_url_valid
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,7 @@ DEFAULT_APP_DIR = ROOT / "firmware"
 #          ones, so the three base parts are tracked here as well.
 BASE_PARTS_DIR = ROOT / "firmware" / "anki-base"
 BOARD_JSON = ROOT / "boards" / "pico" / "board.json"
+OTA_HEADER = ROOT / "main" / "ota_online.h"
 
 # 中文：部件顺序固定，页面与清单都按这个顺序展示。
 # English: Fixed part order, shared by the manifest and the page.
@@ -55,6 +57,26 @@ CHIP_FAMILY = "ESP32-S3"
 CHIP_ID = 9                    # ESP32-S3 image header chip id
 APP_DESC_MAGIC = 0xABCD5432    # esp_app_desc_t magic_word
 APP_DESC_MIN = 176             # 4 + 4 + 8 + 32 + 32 + 16 + 16 + 32 + 32 bytes
+
+# 中文：设备端 Anki 版 OTA 的清单与镜像。清单固定发布在站点的站点根（与
+#      PICO_OTA_ANKI_FEED_URL 完全一致），镜像同样是站点根下的扁平 `Pico-anki-<版本>.bin`：
+#      固件的 pico_release_url_valid() 只接受白名单前缀 + 不带子目录的 .bin，
+#      因此 GitHub Release 的下载地址（含子目录且会 302）不能直接给设备用。
+# English: The device's Anki OTA manifest and image. The manifest is published at the site
+#      root, exactly matching PICO_OTA_ANKI_FEED_URL, and the image is a flat
+#      `Pico-anki-<version>.bin` at the same root: the firmware's pico_release_url_valid()
+#      accepts allowlisted prefixes plus a flat .bin without any subdirectory, so a GitHub
+#      Release download URL (nested, 302) cannot be handed to the device.
+OTA_PREFIX = "https://cyankirin.github.io/kiikoreader-anki/"
+OTA_MANIFEST = "anki-update.json"
+OTA_IMAGE_PREFIX = "Pico-anki-"
+# 中文：与官方清单一致的最低基础版本；低于它先整机刷机。
+# English: Same minimum base version as the official feed; older bases must re-flash.
+OTA_MINIMUM_BASE = "0.3.3-rc72"
+# 中文：notes 进设备端 char[384]，超长会被解析器拒绝。
+# English: notes go into the device's char[384]; anything longer is rejected by the parser.
+OTA_NOTES_MAX = 383
+OTA_NOTES = "Anki 版：导入 .apkg 复习，保留设置与阅读记录。"
 
 
 def board_version(board_json: Path = BOARD_JSON) -> str:
@@ -84,6 +106,124 @@ def read_app_description(image: bytes) -> dict[str, object]:
         "time": field(112, 16),
         "date": field(128, 16),
     }
+
+
+def _define(header: Path, name: str) -> str:
+    """Last `#define <name>` value in ota_online.h, quotes stripped.
+
+    中文：ota_online.h 里有金属板/Pico 两段常量，Pico 段在后面，因此取最后一次出现。
+    English: ota_online.h carries both the Metalio and Pico constant blocks with Pico last,
+          so the last occurrence is the one this fork's device compiles in.
+    """
+    text = header.read_text(encoding="utf-8")
+    values = re.findall(rf"^#define\s+{re.escape(name)}\s+(\S+)", text, re.M)
+    if not values:
+        raise SystemExit(f"{header} declares no {name}")
+    return values[-1].strip('"')
+
+
+def firmware_ota(header: Path = OTA_HEADER) -> dict[str, str]:
+    """The OTA identity the device builds in, read from the firmware header."""
+    return {
+        "project": _define(header, "PICO_OTA_PROJECT"),
+        "board": _define(header, "PICO_OTA_BOARD"),
+        "layout": _define(header, "PICO_OTA_LAYOUT"),
+        "feed": _define(header, "PICO_OTA_ANKI_FEED_URL"),
+        "image_max": _define(header, "PICO_OTA_IMAGE_MAX"),
+    }
+
+
+def ota_image_name(version: str) -> str:
+    """Flat file name of the Anki OTA image at the site root."""
+    return f"{OTA_IMAGE_PREFIX}{version}.bin"
+
+
+def build_ota_manifest(version: str, parts: dict[str, bytes], notes: str = OTA_NOTES) -> dict:
+    """Compose `anki-update.json` from the real application bytes.
+
+    中文：清单里的每个字段都要与设备端编译常量、实际镜像字节对得上，否则这里直接失败：
+          版本 = 镜像内 esp_app_desc_t.version，size/sha256 = 镜像实际字节，
+          project/board/layout = ota_online.h 的 PICO_OTA_*，url 过 pico_release_url_valid()。
+    English: Every field must agree with the device's compile-time constants and the real
+          image bytes, or this fails: version from esp_app_desc_t, size/sha256 from the
+          bytes, project/board/layout from ota_online.h, and a url that passes
+          pico_release_url_valid().
+    """
+    image = parts[APP_PART]
+    desc = read_app_description(image)
+    identity = firmware_ota()
+    if desc["version"] != version:
+        raise SystemExit(
+            f"application image version {desc['version']!r} does not match {version!r}; "
+            f"the OTA manifest must advertise the version inside the image")
+    if desc["project"] != identity["project"]:
+        raise SystemExit(
+            f"application image project {desc['project']!r} is not {identity['project']!r}")
+    limit = int(identity["image_max"], 0)
+    if not 288 <= len(image) <= limit:
+        raise SystemExit(f"application image is {len(image)} bytes, outside the OTA slot ({limit} bytes)")
+    url = OTA_PREFIX + ota_image_name(version)
+    if not release_url_valid(url):
+        raise SystemExit(f"OTA url {url!r} would be rejected by pico_release_url_valid()")
+    if identity["feed"] != OTA_PREFIX + OTA_MANIFEST:
+        raise SystemExit(
+            f"PICO_OTA_ANKI_FEED_URL is {identity['feed']!r}, but this tool publishes "
+            f"{OTA_PREFIX + OTA_MANIFEST!r}; keep the firmware constant and the site path in step")
+    if len(notes.encode("utf-8")) > OTA_NOTES_MAX:
+        raise SystemExit(f"OTA notes are {len(notes.encode('utf-8'))} bytes, over {OTA_NOTES_MAX}")
+    return {
+        "schema": 1,
+        "version": version,
+        "project": identity["project"],
+        "board": identity["board"],
+        "layout": identity["layout"],
+        "minimum_base_version": OTA_MINIMUM_BASE,
+        "url": url,
+        "size": len(image),
+        "sha256": hashlib.sha256(image).hexdigest(),
+        "notes": notes,
+    }
+
+
+def stage_ota(destination: Path, version: str, parts: dict[str, bytes]) -> dict:
+    """Publish `anki-update.json` and `Pico-anki-<version>.bin` at the site root."""
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    manifest = build_ota_manifest(version, parts)
+    image = destination / ota_image_name(version)
+    if not image.is_file() or image.read_bytes() != parts[APP_PART]:
+        image.write_bytes(parts[APP_PART])
+    text = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"
+    path = destination / OTA_MANIFEST
+    if not path.is_file() or path.read_text(encoding="utf-8") != text:
+        path.write_text(text, encoding="utf-8")
+    verify_ota(destination, version, parts)
+    return manifest
+
+
+def verify_ota(destination: Path, version: str, parts: dict[str, bytes]) -> dict:
+    """Check the published manifest against the bytes that are actually on the site."""
+    destination = Path(destination)
+    path = destination / OTA_MANIFEST
+    if not path.is_file():
+        raise SystemExit(f"no OTA manifest at {path}")
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    expected = build_ota_manifest(version, parts)
+    if manifest != expected:
+        raise SystemExit(
+            f"{path} does not match the staged bundle: {json.dumps(manifest, ensure_ascii=False)} "
+            f"!= {json.dumps(expected, ensure_ascii=False)}")
+    if not release_url_valid(manifest["url"]):
+        raise SystemExit(f"OTA url {manifest['url']!r} fails pico_release_url_valid()")
+    image = destination / ota_image_name(version)
+    if not image.is_file():
+        raise SystemExit(f"OTA image {image} is missing")
+    data = image.read_bytes()
+    if len(data) != manifest["size"] or hashlib.sha256(data).hexdigest() != manifest["sha256"]:
+        raise SystemExit(f"OTA image {image} does not match the manifest size/sha256")
+    if data != parts[APP_PART]:
+        raise SystemExit(f"OTA image {image} is not the application image of the bundle")
+    return manifest
 
 
 def _package_offsets(manifest: dict) -> dict[str, int]:
@@ -376,7 +516,7 @@ def publish(staging: Path, destination: Path) -> None:
 
 def stage(destination: Path, package: Path | None = None, base_dir: Path | None = None,
           app_image: Path | None = None, version: str | None = None,
-          use_default_package: bool = True) -> dict:
+          use_default_package: bool = True, ota_dir: Path | None = None) -> dict:
     """Generate the bundle at `destination`, but only publish it once it verifies.
 
     中文：先在同级临时目录里生成 → 用 verify() 校验 → 通过后才逐文件原子替换到目标目录；
@@ -408,6 +548,13 @@ def stage(destination: Path, package: Path | None = None, base_dir: Path | None 
               f"SHA256 {part['sha256']}")
     fork = manifest["anki_fork"]
     print(f"  built {fork['build_date']} {fork['build_time']} (device time of the build)")
+    # 中文：设备端 OTA 清单与镜像发布在站点根，和网页刷机用的 /anki/ 目录分开。
+    # English: The device OTA manifest and image go to the site root, separate from /anki/.
+    if ota_dir is not None:
+        ota = stage_ota(Path(ota_dir), resolved_version, parts)
+        print(f"OTA manifest staged: {Path(ota_dir) / OTA_MANIFEST} (version {ota['version']}, "
+              f"{ota['size']} bytes, SHA256 {ota['sha256'][:16]}…)")
+        print(f"  url {ota['url']}")
     return manifest
 
 
@@ -427,6 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--app-image", type=Path,
                         help="fallback application image (default: firmware/Read_Pico-<version>.bin)")
     parser.add_argument("--version", help="expected firmware version (default: boards/pico/board.json)")
+    parser.add_argument("--ota-dir", type=Path,
+                        help="site root that also receives anki-update.json and "
+                             "Pico-anki-<version>.bin (the device OTA pair)")
     parser.add_argument("--check", action="store_true",
                         help="verify the staged bundle without writing anything")
     args = parser.parse_args(argv)
@@ -440,9 +590,15 @@ def main(argv: list[str] | None = None) -> int:
         for part in parts:
             print(f"  {part['path']}: {part['size']} bytes at 0x{part['offset']:x}, "
                   f"SHA256 {part['sha256']}")
+        if args.ota_dir is not None:
+            bundle = {name: (Path(args.destination) / name).read_bytes() for name in PART_ORDER}
+            ota = verify_ota(args.ota_dir, expected_version, bundle)
+            print(f"OTA manifest OK: {Path(args.ota_dir) / OTA_MANIFEST} (url {ota['url']}, "
+                  f"{ota['size']} bytes, SHA256 {ota['sha256'][:16]}…)")
         return 0
     stage(args.destination, None if args.no_package else args.package, args.base_dir,
-          args.app_image, expected_version, use_default_package=not args.no_package)
+          args.app_image, expected_version, use_default_package=not args.no_package,
+          ota_dir=args.ota_dir)
     return 0
 
 
