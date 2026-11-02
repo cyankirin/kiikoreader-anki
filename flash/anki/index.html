@@ -44,6 +44,15 @@
   button.activate:hover { background: #333; }
   button.activate:disabled { background: #999; border-color: #999; cursor: not-allowed; }
   .support { margin: 14px 0 0; font-size: 13px; color: #777; min-height: 1.2em; }
+  .picker {
+    margin: 0 0 26px; padding: 16px 18px; border: 1px solid #e2e2e2; border-radius: 10px;
+  }
+  .picker label { display: block; font-size: 13px; color: #777; margin-bottom: 8px; }
+  .picker select {
+    width: 100%; padding: 10px 12px; font: inherit; font-size: 15px; color: #111;
+    background: #fff; border: 1px solid #ccc; border-radius: 8px;
+  }
+  .picker .support { margin: 10px 0 0; }
   h2 { margin: 34px 0 10px; font-size: 16px; letter-spacing: .01em; }
   ul { margin: 0; padding-left: 20px; color: #333; font-size: 14px; }
   li { margin: 6px 0; }
@@ -69,6 +78,16 @@
     <dt>适用设备</dt><dd>小纸 Pico · RDP-G01-W · ESP32-S3</dd>
     <dt>数据策略</dt><dd>默认保留设置与阅读进度（询问页的「Erase device」保持不勾选）</dd>
   </dl>
+
+  <div class="picker">
+    <label for="version">选择要写入的版本</label>
+    <select id="version" aria-describedby="version-note">
+      <option value="./manifest.json">读取中…</option>
+    </select>
+    <p id="version-note" class="support">
+      旧版本使用仓库<b>当前的引导程序与分区表</b>（各版本分区表一致，仅应用镜像不同），刷完仍可再选回最新版。
+    </p>
+  </div>
 
   <div class="install">
     <p>
@@ -153,19 +172,63 @@
   // 中文：给刷机按钮挂上「先校验、再开串口」的钩子（install-button.js 预留的 prepareManifest）。
   //      钩子在 port.open() 之前执行：抛错则安装器直接中止，不打开串口、不擦除、不写入。
   //      四个部件各下载一次，校验通过后以 blob: 交回安装器，因此不会重复下载固件。
+  //      校验入口始终跟着下拉框当前选中的清单走，不写死版本。
   // English: Attach the verify-before-open hook that install-button.js exposes as
   //      `prepareManifest`. It runs before `port.open()`, so throwing aborts the install
   //      without opening the port, erasing or writing. Each part is downloaded once and
-  //      handed back as blob: URLs, so the firmware is never fetched twice.
+  //      handed back as blob: URLs, so the firmware is never fetched twice. The verifier
+  //      always follows the manifest the picker currently selects; no version is hard-coded.
   import { prepareBundle } from './integrity.js';
 
   const supportStatus = document.getElementById('support-status');
   const installButton = document.querySelector('esp-web-install-button');
+  const picker = document.getElementById('version');
+  const metaVersion = document.getElementById('meta-version');
+  const metaBuilt = document.getElementById('meta-built');
+  const DEFAULT_MANIFEST = './manifest.json';
+  const choices = [{ manifest: DEFAULT_MANIFEST, version: '', label: '' }];
+
+  // 中文：当前选中的清单就是安装器与校验器共用的那一份；下拉框没有匹配项时退回默认清单。
+  // English: The selected manifest is what both the installer and the verifier use; fall back
+  //      to the default manifest when the picker has no match.
+  function currentManifest() {
+    const chosen = choices.find((item) => item.manifest === (picker ? picker.value : ''));
+    return chosen ? chosen.manifest : DEFAULT_MANIFEST;
+  }
+
+  function showMeta(manifest) {
+    if (!manifest) {
+      metaVersion.textContent = '见清单';
+      metaBuilt.textContent = '见清单';
+      return;
+    }
+    metaVersion.textContent = manifest.version || '—';
+    const fork = manifest.anki_fork || {};
+    metaBuilt.textContent = fork.build_date && fork.build_time
+      ? fork.build_date + ' ' + fork.build_time : '—';
+  }
+
+  async function loadMeta(manifestURL) {
+    try {
+      const response = await fetch(manifestURL, { cache: 'no-store' });
+      showMeta(response.ok ? await response.json() : null);
+    } catch (error) {
+      showMeta(null);
+    }
+  }
+
+  function selectManifest(manifestURL) {
+    if (installButton && manifestURL !== DEFAULT_MANIFEST) installButton.setAttribute('manifest', manifestURL);
+    else if (installButton) installButton.setAttribute('manifest', DEFAULT_MANIFEST);
+    loadMeta(manifestURL);
+  }
+
   if (installButton) {
     installButton.prepareManifest = async function prepareManifest() {
+      const manifestURL = new URL(currentManifest(), document.baseURI).href;
       supportStatus.textContent = '正在下载并逐项校验四个部件（SHA-256）…';
       try {
-        const prepared = await prepareBundle(new URL('./manifest.json', document.baseURI).href);
+        const prepared = await prepareBundle(manifestURL);
         supportStatus.textContent = '四个部件已逐项校验通过（SHA-256 与清单一致），开始写入 ' +
           prepared.manifest.version + '。';
         return prepared;
@@ -176,31 +239,47 @@
       }
     };
   }
-</script>
-<script>
-  // 中文：版本与构建时间直接取自已校验的清单，避免页面与固件对不上。
-  // English: Read the version and build time from the verified manifest so the page cannot drift.
-  (function () {
-    var status = document.getElementById('support-status');
-    if (!window.isSecureContext) {
-      status.textContent = '当前不是 HTTPS 安全上下文，浏览器会拒绝访问串口。';
-    } else if (!('serial' in navigator)) {
-      status.textContent = '当前浏览器没有 WebSerial，请改用电脑上的 Chrome 或 Edge。';
+
+  if (picker) {
+    picker.addEventListener('change', function () { selectManifest(currentManifest()); });
+  }
+
+  // 中文：版本列表来自部署时生成的 releases.json；读不到就只保留默认的最新清单。
+  // English: The list comes from releases.json generated at deploy time; when it cannot be
+  //      read, only the default (latest) manifest stays available.
+  (async function loadVersions() {
+    let applied = false;
+    try {
+      const response = await fetch('./releases.json', { cache: 'no-store' });
+      const catalog = response.ok ? await response.json() : null;
+      const releases = catalog && Array.isArray(catalog.releases) ? catalog.releases : [];
+      if (releases.length && picker) {
+        picker.textContent = '';
+        choices.length = 0;
+        for (const release of releases) {
+          const option = document.createElement('option');
+          option.value = release.manifest;
+          option.textContent = release.version + ' · ' + release.label;
+          picker.append(option);
+          choices.push({ manifest: release.manifest, version: release.version, label: release.label });
+        }
+        picker.value = releases[0].manifest;
+        applied = true;
+      }
+    } catch (error) {
+      // 中文：列表缺失时页面仍可刷默认清单，因此这里不打断用户。
+      // English: Without the catalog the default manifest still flashes, so stay quiet here.
     }
-    fetch('./manifest.json', { cache: 'no-store' })
-      .then(function (response) { return response.ok ? response.json() : null; })
-      .then(function (manifest) {
-        if (!manifest) { throw new Error('manifest'); }
-        document.getElementById('meta-version').textContent = manifest.version || '—';
-        var fork = manifest.anki_fork || {};
-        document.getElementById('meta-built').textContent =
-          fork.build_date && fork.build_time ? fork.build_date + ' ' + fork.build_time : '—';
-      })
-      .catch(function () {
-        document.getElementById('meta-version').textContent = '见下方清单';
-        document.getElementById('meta-built').textContent = '见下方清单';
-      });
+    selectManifest(applied ? currentManifest() : DEFAULT_MANIFEST);
   })();
+
+  // 中文：非安全上下文或缺 WebSerial 时先说明原因，再加载版本信息。
+  // English: Explain a missing secure context or WebSerial first, then load the version info.
+  if (!window.isSecureContext) {
+    supportStatus.textContent = '当前不是 HTTPS 安全上下文，浏览器会拒绝访问串口。';
+  } else if (!('serial' in navigator)) {
+    supportStatus.textContent = '当前浏览器没有 WebSerial，请改用电脑上的 Chrome 或 Edge。';
+  }
 </script>
 </body>
 </html>

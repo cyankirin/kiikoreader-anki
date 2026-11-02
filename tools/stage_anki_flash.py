@@ -77,6 +77,12 @@ OTA_MINIMUM_BASE = "0.3.3-rc72"
 # English: notes go into the device's char[384]; anything longer is rejected by the parser.
 OTA_NOTES_MAX = 383
 OTA_NOTES = "Anki 版：导入 .apkg 复习，保留设置与阅读记录。"
+# 中文：网页刷机可回退的版本清单（最多四个），每版都从 firmware/ 里入库的镜像现场生成。
+# English: Rollback choices for the web flasher (at most four); each bundle is generated
+#          from a committed firmware/ image at deploy time.
+RELEASES_CATALOG = DEFAULT_DESTINATION / "releases.json"
+RELEASE_LIMIT = 4
+RELEASE_DIRNAME = "releases"
 
 
 def board_version(board_json: Path = BOARD_JSON) -> str:
@@ -516,7 +522,8 @@ def publish(staging: Path, destination: Path) -> None:
 
 def stage(destination: Path, package: Path | None = None, base_dir: Path | None = None,
           app_image: Path | None = None, version: str | None = None,
-          use_default_package: bool = True, ota_dir: Path | None = None) -> dict:
+          use_default_package: bool = True, ota_dir: Path | None = None,
+          releases: bool = True) -> dict:
     """Generate the bundle at `destination`, but only publish it once it verifies.
 
     中文：先在同级临时目录里生成 → 用 verify() 校验 → 通过后才逐文件原子替换到目标目录；
@@ -555,7 +562,87 @@ def stage(destination: Path, package: Path | None = None, base_dir: Path | None 
         print(f"OTA manifest staged: {Path(ota_dir) / OTA_MANIFEST} (version {ota['version']}, "
               f"{ota['size']} bytes, SHA256 {ota['sha256'][:16]}…)")
         print(f"  url {ota['url']}")
+    # 中文：网页刷机的历史版本包按 flash/anki/releases.json 现场生成，仓库里只存清单。
+    # English: Historical web-flash bundles are generated from flash/anki/releases.json, so
+    #          only the catalog is tracked.
+    if releases:
+        for entry in stage_releases(destination, resolved_version):
+            print(f"  release bundle {entry['version']}: {entry['manifest']}")
     return manifest
+
+
+def read_release_catalog(catalog: Path = RELEASES_CATALOG) -> list[dict]:
+    """Read and validate the rollback catalog the page renders as a version picker."""
+    if not catalog.is_file():
+        return []
+    data = json.loads(catalog.read_text(encoding="utf-8"))
+    if data.get("schema") != 1 or not isinstance(data.get("releases"), list):
+        raise SystemExit(f"{catalog} must be {{'schema': 1, 'releases': [...]}}")
+    releases = data["releases"]
+    if not 1 <= len(releases) <= RELEASE_LIMIT:
+        raise SystemExit(f"{catalog} lists {len(releases)} releases, allowed 1..{RELEASE_LIMIT}")
+    seen: set[str] = set()
+    for entry in releases:
+        version = entry.get("version")
+        if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version):
+            raise SystemExit(f"{catalog} has an invalid version: {version!r}")
+        if version in seen:
+            raise SystemExit(f"{catalog} repeats version {version}")
+        seen.add(version)
+        if entry.get("manifest") != f"{RELEASE_DIRNAME}/{version}/manifest.json":
+            raise SystemExit(f"{catalog}: manifest for {version} must be "
+                             f"{RELEASE_DIRNAME}/{version}/manifest.json")
+        if not isinstance(entry.get("label"), str) or not entry["label"]:
+            raise SystemExit(f"{catalog}: {version} needs a label")
+    return releases
+
+
+def stage_releases(destination: Path, current_version: str) -> list[dict]:
+    """Generate one flashable bundle per catalog entry, newest first.
+
+    中文：每版都用 `firmware/Read_Pico-<版本>.bin` + 入库的基础部件现场生成，并各自过一遍
+          与当前版本相同的闸门（偏移/大小/SHA-256/版本对账）。基础部件统一用
+          firmware/anki-base/，因此可回退包写的是同一套引导程序与分区表。
+    English: Each version is assembled from its committed `firmware/Read_Pico-<version>.bin`
+          plus the tracked base parts and must pass the same gate as the current build
+          (offsets, sizes, SHA-256, version reconciliation). Base parts always come from
+          firmware/anki-base/, so every rollback bundle writes the same bootloader and
+          partition table.
+    """
+    entries = read_release_catalog()
+    if not entries:
+        return []
+    if entries[0]["version"] != current_version:
+        raise SystemExit(
+            f"{RELEASES_CATALOG} must list {current_version} first; got {entries[0]['version']}")
+    results = []
+    for entry in entries:
+        version = entry["version"]
+        app = DEFAULT_APP_DIR / f"{PROJECT}-{version}.bin"
+        if not app.is_file():
+            raise SystemExit(f"missing rollback image {app}")
+        folder = Path(destination) / RELEASE_DIRNAME / version
+        # 中文：历史版本不使用本次构建包（包只属于当前版本），只用入库的基础部件。
+        # English: Historical versions never use this build's package; tracked base parts only.
+        stage(folder, None, None, app, version, use_default_package=False,
+              ota_dir=None, releases=False)
+        results.append({"version": version, "manifest": f"{RELEASE_DIRNAME}/{version}/manifest.json",
+                        "label": entry["label"]})
+    return results
+
+
+def verify_releases(destination: Path) -> list[dict]:
+    """Re-check every generated rollback bundle against its catalog entry."""
+    entries = read_release_catalog()
+    checked = []
+    for entry in entries:
+        version = entry["version"]
+        folder = Path(destination) / RELEASE_DIRNAME / version
+        manifest = verify(folder, version)
+        if manifest["anki_fork"]["app_version"] != version:
+            raise SystemExit(f"rollback bundle {version} advertises another version")
+        checked.append({"version": version, "manifest": entry["manifest"]})
+    return checked
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -595,6 +682,8 @@ def main(argv: list[str] | None = None) -> int:
             ota = verify_ota(args.ota_dir, expected_version, bundle)
             print(f"OTA manifest OK: {Path(args.ota_dir) / OTA_MANIFEST} (url {ota['url']}, "
                   f"{ota['size']} bytes, SHA256 {ota['sha256'][:16]}…)")
+        for entry in verify_releases(args.destination):
+            print(f"Rollback bundle OK: {entry['version']} ({entry['manifest']})")
         return 0
     stage(args.destination, None if args.no_package else args.package, args.base_dir,
           args.app_image, expected_version, use_default_package=not args.no_package,

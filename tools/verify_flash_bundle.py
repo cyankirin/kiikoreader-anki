@@ -30,6 +30,7 @@ ANKI_OTA_LAYOUT = "pico-dual-4m-v1"
 ANKI_OTA_MINIMUM_BASE = "0.3.3-rc72"
 ANKI_OTA_NOTES_MAX = 383          # char notes[384] on the device
 ANKI_OTA_IMAGE_MAX = 0x400000     # PICO_OTA_IMAGE_MAX for the pico layout
+ANKI_RELEASE_LIMIT = 4
 
 
 def release_url_valid(url: str) -> bool:
@@ -301,6 +302,19 @@ def check_anki_bundle(folder: Path) -> dict:
         assert located, f"browser verifier does not declare {name}"
         assert int(located.group(1), 16) == start, f"browser verifier offset for {name} drifted"
         assert int(located.group(2), 16) == end - start, f"browser verifier capacity for {name} drifted"
+    # 中文：版本选择必须是真代码：页面上有 <select id="version">、真的读了 releases.json、
+    #       并在切换时改写安装按钮的 manifest，同时用当前选择驱动校验钩子。
+    # English: The version picker must be real code: a <select id="version"> on the page, an
+    #      actual releases.json fetch, the install button's manifest switched on change, and
+    #      the verify hook driven by the current selection.
+    assert re.search(r"<select[^>]*\bid=\"version\"", code), (
+        "Anki page must expose a <select id=\"version\"> picker")
+    assert re.search(r"fetch\(\s*['\"]\./releases\.json['\"]", code), (
+        "Anki page must load ./releases.json for the picker")
+    assert re.search(r"setAttribute\(\s*['\"]manifest['\"]", code), (
+        "Anki page must point the install button at the selected manifest")
+    assert re.search(r"currentManifest\(", code), (
+        "Anki page must resolve the manifest through currentManifest() so the verifier follows the picker")
     for name in ("bootloader.bin", "partitions.bin", "firmware.bin", "ota_data_initial.bin"):
         data = (folder / name).read_bytes()
         print(f"anki/{name}: {len(data)} bytes, SHA256 {hashlib.sha256(data).hexdigest()}")
@@ -348,6 +362,40 @@ def check_anki_ota(site: Path, anki: Path | None = None) -> dict:
             "the OTA image and the /anki/ application image must be the same bytes")
     print(f"Anki OTA feed verified: {version} -> {feed['url']}")
     return feed
+
+
+def check_anki_releases(folder: Path, current_version: str) -> list[dict]:
+    """Validate every rollback bundle the version picker offers.
+
+    中文：每个版本都是一次完整的刷机：四件套、偏移、大小、SHA-256、分区表与镜像内版本
+          逐项对齐，且第一项必须是当前版本（默认选项）。目录不存在时返回空表。
+    English: Every version is a full flash: all four parts, offsets, sizes, SHA-256, the
+          partition table and the version inside the image, all checked; the first entry must
+          be the current version (the default choice). Returns an empty list when absent.
+    """
+    catalog_path = folder / "releases.json"
+    if not catalog_path.is_file():
+        return []
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    assert catalog.get("schema") == 1 and isinstance(catalog.get("releases"), list)
+    releases = catalog["releases"]
+    assert 1 <= len(releases) <= ANKI_RELEASE_LIMIT, "version picker allows one to four builds"
+    seen: set[str] = set()
+    for release in releases:
+        version = release.get("version")
+        assert isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+(?:-rc\d+(?:\.\d+)?)?", version)
+        assert version not in seen, f"duplicate offered version {version}"
+        seen.add(version)
+        assert release.get("manifest") == f"releases/{version}/manifest.json", "manifest path drifted"
+        assert isinstance(release.get("label"), str) and release["label"], "missing version label"
+        bundle = folder / "releases" / version
+        manifest = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+        assert _check_anki_parts(bundle, manifest) == version, f"rollback bundle {version} mislabelled"
+        print(f"anki/releases/{version}: four parts verified, data preserved")
+    assert releases[0]["version"] == current_version, (
+        "the version picker must default to the current build")
+    print(f"Anki version picker verified: {len(releases)} builds, current {current_version}")
+    return releases
 
 
 if __name__ == "__main__":

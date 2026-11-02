@@ -31,6 +31,7 @@ on:
       - flash/metalio-native-stub.js
       - tools/metalio_release_assets.py
       - flash/update.json
+      - flash/anki/releases.json
       - main/ota_online.h
       - boards/pico/board.json
       - flash/Pico-update*.bin

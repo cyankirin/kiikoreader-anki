@@ -11,7 +11,8 @@ import re
 import sys
 from urllib.parse import urlparse
 
-from verify_flash_bundle import check, check_archived_releases, check_anki_bundle, check_anki_ota
+from verify_flash_bundle import (check, check_archived_releases, check_anki_bundle,
+                                  check_anki_ota, check_anki_releases)
 from release_assets import hydrate
 from metalio_release_assets import stage_metalio
 from stage_anki_flash import stage as stage_anki, verify as verify_anki
@@ -71,6 +72,12 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         # English: The page imports its browser-side verifier by relative path, so it has to
         #      be published too; without it the install button can only fail.
         shutil.copy2(FLASH / "anki" / "integrity.js", anki_output / "integrity.js")
+        # 中文：版本选择清单是可回退版本的目录，页面按它渲染下拉框；每个版本的四件套由
+        #       stage_anki 现场生成并逐版过闸门。
+        # English: The catalog lists the rollback builds the page offers; stage_anki
+        #      generates each bundle on the spot and gates every one of them.
+        if (FLASH / "anki" / "releases.json").is_file():
+            shutil.copy2(FLASH / "anki" / "releases.json", anki_output / "releases.json")
         # 中文：ota_dir 指站点根——设备端 Anki 版 OTA 的清单与镜像都要求放在站点根下的扁平
         #       文件名，任何子目录或 Release 地址都会被 pico_release_url_valid() 拒绝。
         # English: ota_dir is the site root: the device's Anki OTA manifest and image must sit
@@ -78,8 +85,9 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         #        pico_release_url_valid().
         stage_anki(anki_output, base_dir=output, ota_dir=output)
         verify_anki(anki_output)
-        check_anki_bundle(anki_output)
+        anki_manifest = check_anki_bundle(anki_output)
         check_anki_ota(output, anki_output)
+        check_anki_releases(anki_output, anki_manifest["version"])
     # 保留已发布版本的固定下载地址，避免旧清单缓存或正在进行的更新突然遇到 404。
     # Keep immutable published URLs so cached manifests and in-flight updates do not suddenly get a 404.
     for upgrade in FLASH.glob("Pico-update-*.bin"):

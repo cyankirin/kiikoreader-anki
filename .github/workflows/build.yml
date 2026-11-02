@@ -94,6 +94,9 @@ jobs:
           python3 tools/reader_spacing_host_test.py
           python3 tools/test_book_toc.py
           node tools/flasher_integrity_host_test.cjs
+          # /anki/ 页面的版本选择：下拉框来自 releases.json，校验钩子跟随当前选择。
+          # The /anki/ version picker: options come from releases.json and the verify hook follows it.
+          node tools/anki_page_picker_host_test.mjs
           python3 tools/vertical_punctuation_host_test.py
           python3 tools/vertical_number_host_test.py
           # Anki 卡组解析/渲染/调度的宿主测试与版面探针（本 fork 新增）。
