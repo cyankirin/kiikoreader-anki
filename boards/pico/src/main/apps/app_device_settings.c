@@ -874,6 +874,13 @@ static void settings_fit_text(char *value, int px, int width) {
     }
 }
 static void fit_value(char *value, int width) { settings_fit_text(value,20,width); }
+// 固定字号的行按同一字号量宽裁剪；用跟随系统字号的宽度去裁固定字号会在大字号下多砍字。
+// Trim fixed-size rows with the size they are drawn at; measuring at the scaled size over-trims.
+static void fit_fixed(char *value, int px, int width) {
+    while (value[0] && ui_text_fixed_width_px(px,value)>width) {
+        size_t n=strlen(value)-1;while(n&&((unsigned char)value[n]&0xc0)==0x80)--n;value[n]=0;
+    }
+}
 
 static void settings_switch(uint8_t *fb, int center_y, bool active) {
     // 灰色轨道在滚动差分扫描下会经过深色相位产生黑闪；纯黑白无灰阶过渡，任何刷新模式都稳定。
@@ -1377,11 +1384,18 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
             ui_draw_button(fb, upgrade_confirm_button(s_upgrade_online, true), s_upgrade_online ? "开始更新" : "确认升级", true);
         } else {
             settings_card(fb, (EpdRect){36, 340, 612, 280}, 22, UI_GRAY_WHITE, 0x70);
-            ui_text(fb, 60, 362, 29, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
+            // 中文：标题与说明行是卡片内的固定排版，不能跟随系统字号：120% 时说明行就已压进
+            //       第一个通道行（顶边 424），150% 时两行还互相重叠。这里按 100% 的等效字号
+            //       写成固定字号（29+2、21+2），四档字号下几何与 100% 完全一致。
+            // English: The heading and its note are fixed layout inside the card and must not follow
+            //          the system size: at 120% the note already runs into the first channel row
+            //          (top edge 424) and at 150% the two rows overlap. Drawing at the 100% equivalent
+            //          size (29+2, 21+2) keeps the geometry identical at every system size.
+            ui_text_fixed(fb, 60, 362, 31, "联网 OTA", EPD_DRAW_ALIGN_LEFT, false);
             char detail[96];
             snprintf(detail, sizeof(detail), "%s", s_update.message[0] ? s_update.message : "选择通道，连上 WiFi 后检查新版本");
-            fit_value(detail, 540);
-            ui_text(fb, 60, 400, 21, detail, EPD_DRAW_ALIGN_LEFT, false);
+            fit_fixed(detail, 23, 540);
+            ui_text_fixed(fb, 60, 400, 23, detail, EPD_DRAW_ALIGN_LEFT, false);
             if (s_update.state == PICO_UPDATE_DOWNLOADING) draw_upgrade_progress(fb);
             else draw_upgrade_channels(fb);
             settings_card(fb, (EpdRect){36, 662, 612, 262}, 22, UI_GRAY_WHITE, 0x70);
