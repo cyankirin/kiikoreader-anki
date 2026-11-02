@@ -31,6 +31,8 @@ static int64_t s_clock_minute;
 static struct tm s_date;
 static int E0470_WAVEFORM;
 static bool display_pipeline_enabled(void){return pipeline;}
+static bool widgets_paused;
+static bool home_widgets_paused(void){return widgets_paused;}
 static int app_settings_home_component(void){return component;}
 static bool app_settings_main_fast_refresh(void){return false;}
 static void ui_fill_rect_fast(EpdRect r,unsigned x,uint8_t*fb){(void)r;(void)x;fb[0]=0;}
@@ -53,6 +55,10 @@ int main(void){
   pipeline=false;fail=false;calls=guards=0;s_clock_pending=true;s_clock_minute=1233;assert(run(&c));unsigned old=calls;assert(guards==1&&s_clock_minute==1234);
   pipeline=true;calls=guards=0;s_clock_pending=true;s_clock_minute=1233;c.fb=actual;assert(run(&c));assert(guards==1&&calls==1&&!s_clock_pending&&s_clock_minute==1234&&!memcmp(actual,reference,8));
   assert(old==(unsigned)(s_view==HOME_ROOT&&component!=APP_HOME_FOLDER?2:1));
+  // 组件暂停时（PSRAM 紧张），分钟局刷只更新状态栏时钟、不重绘表盘，无论板型都只有一次呈现。
+  // With the widgets paused the minute tick only repaints the status clock: exactly one present.
+  widgets_paused=true;calls=guards=0;s_clock_pending=true;s_clock_minute=1233;c.fb=reference;
+  assert(run(&c));assert(guards==1&&calls==1&&s_clock_minute==1234);widgets_paused=false;
   fail=true;calls=guards=0;s_clock_pending=true;s_clock_minute=1233;assert(run(&c));assert(calls==1&&guards==1&&s_clock_minute==1233);
  }
  puts("PASS: actual Home minute branch retains painted target, merges header/static-clock outputs, preserves folder/subview scope and retries failed display");
