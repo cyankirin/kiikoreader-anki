@@ -95,6 +95,14 @@ static bool app_settings_reader_power_turn(void){return true;}
 static bool app_settings_reader_immersive(void){return false;}
 static bool app_settings_reader_hide_images(void){return false;}
 '''
+# ui_text_box 依赖 ui_text_uses_builtin（内建字形与 TTF 的唯一取舍点），它同样只存在于
+# ui_kit.c；不抽取就会在生成单元里变成未声明调用，-Werror 下直接失败。它的依赖
+# （s_system_ttf、ttf_font_is_builtin、ui_font_has_text）已由上面的桩提供。
+# / ui_text_box needs ui_text_uses_builtin (the single built-in-vs-TTF decision point),
+# which also lives only in ui_kit.c; without extracting it the generated unit calls an
+# undeclared symbol and fails under -Werror. Its inputs (s_system_ttf,
+# ttf_font_is_builtin, ui_font_has_text) come from the stubs above.
+unit+=function('ui_text_uses_builtin',kit)+'\n'
 unit+=function('ui_text_box',kit).replace('void ui_text_box(', 'static void actual_text_box(')+'\n'
 unit+=r'''
 static void ui_text_box(uint8_t *fb,EpdRect box,int px,const char *text,enum EpdFontFlags align,bool inv){
