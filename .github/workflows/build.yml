@@ -67,10 +67,6 @@ jobs:
           # Anki 卡组解析/渲染/调度的宿主测试与版面探针（本 fork 新增）。
           # Host tests and the layout probe for the Anki importer/renderer/scheduler (this fork).
           bash tools/run_anki_host_tests.sh
-          # 联网升级：清单解析/版本比较 + 两块板各自的 OTA 任务（rc103 起按板存放）。
-          # Online update: release parsing/ordering plus each board's own OTA worker,
-          # which lives per board since rc103.
-          bash tools/run_ota_host_tests.sh
 
   build:
     runs-on: ubuntu-latest
@@ -97,6 +93,12 @@ jobs:
           if [ "${{ matrix.board }}" = pico ]; then
             python tools/lowzag_host_test.py --component build/boards/pico/source/managed_components/defensiblelogic__lowzag
           fi
+          # 联网升级：清单解析/版本比较 + 本板的 OTA 任务。宿主测试要读 managed_components
+          # 里的 cJSON，它由组件管理器在构建时生成，所以这一步必须排在构建之后，不能放进
+          # 干净检出的 display-host-tests。
+          # Online update host tests need cJSON from managed_components/, which the
+          # component manager materializes during the build; run them after it.
+          CC=gcc bash tools/run_ota_host_tests.sh
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.board }}
