@@ -77,6 +77,13 @@ static void ui_fill_rect_fast(EpdRect r,int gray,uint8_t *fb){ui_fill_round_rect
 static void ui_hairline(uint8_t *fb,int y,int x,int w,int gray){ui_fill_rect_fast((EpdRect){x,y,w,1},gray,fb);}
 '''
 unit += source[source.index('static size_t s_chapter_jump_page;'):source.index('// 微调长按只更新预览')]
+# ui_text_box 现在会先问 ui_text_uses_builtin（内建字形与 TTF 的唯一取舍点），它同样
+# 只在 ui_kit.c 里，必须跟着一起抽；它的输入 s_system_ttf、ttf_font_is_builtin、
+# ui_font_has_text 已由上面的桩提供。/ ui_text_box now asks ui_text_uses_builtin
+# (the single built-in-vs-TTF decision point), which also lives only in ui_kit.c, so
+# it is extracted too; its inputs s_system_ttf, ttf_font_is_builtin and
+# ui_font_has_text come from the stubs above.
+unit += function('ui_text_uses_builtin', ROOT/'main/ui/ui_kit.c') + '\n'
 unit += function('ui_text_box', ROOT/'main/ui/ui_kit.c').replace('void ui_text_box(', 'static void actual_text_box(') + '\n'
 unit += '\n#define READER_STATS_TOP 586\n#define READER_JUMP_TOP 518\n'
 for name in ('reader_page_offset', 'reader_stats_control_rect', 'reader_chapter_key_rect',
@@ -129,7 +136,8 @@ int main(void){
  copy_text(s_chapter_jump_digits,sizeof(s_chapter_jump_digits),"00032");assert(reader_chapter_jump_parse(&page)&&page==31);
  tap(&ctx,31);assert(!strcmp(s_chapter_jump_digits,"0003")&&!s_chapter_jump_error);
  tap(&ctx,29);assert(!s_chapter_jump_digits[0]);
- for(int i=0;i<50;++i)tap(&ctx,28);assert(strlen(s_chapter_jump_digits)==sizeof(s_chapter_jump_digits)-1);
+ for(int i=0;i<50;++i){tap(&ctx,28);}
+ assert(strlen(s_chapter_jump_digits)==sizeof(s_chapter_jump_digits)-1);
  tap(&ctx,32);assert(s_reader_panel==READER_PANEL_STATS&&s_page==6&&!saves);
  s_chapter_jump_page=0;assert(tap(&ctx,2)==APP_REDRAW_NONE&&s_chapter_jump_page==0);
  s_chapter_jump_page=31;assert(tap(&ctx,4)==APP_REDRAW_NONE&&s_chapter_jump_page==31);

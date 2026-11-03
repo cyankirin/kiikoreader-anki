@@ -10,6 +10,10 @@ def function(name):
   depth+=(s[i]=='{')-(s[i]=='}');i+=1
  return s[start:i]
 helpers='\n'.join(function(n) for n in ['int64_t date_stamp(', 'ui_home_clock_style_t clock_style(', 'EpdRect time_clock_bounds(', 'EpdRect component_clock_bounds(', 'EpdRect component_clock_graphics(', 'bool visible_motion_clock(', 'enum EpdDrawError present_clock_area(', 'enum EpdDrawError present_clock_motion('])
+# 低内存暂停判定与它依赖的静态态：present/tick 的切片都会调用，必须拼在使用之前。
+# / The low-memory pause check and the static it owns: the present/tick slices call
+# it, so it has to be spliced in ahead of them.
+pause='static bool s_widgets_paused;\n'+function('bool home_widgets_paused(')
 present=function('bool present(')
 tick=function('app_redraw_t on_tick(')
 media_start=tick.index('    if(s_view==HOME_ROOT||folder_preview){');brace=tick.index('{',media_start);media_end=brace+1;depth=1
@@ -17,6 +21,12 @@ while depth:
  depth+=(tick[media_end]=='{')-(tick[media_end]=='}');media_end+=1
 tick=tick[:media_start]+tick[media_end:];tick=tick[:tick.index('    home_book_t *books[3]')]+'return APP_REDRAW_NONE;}\n'
 unit=r'''
+// present/tick 里的 S31 专用分支（组件预热时间戳、页预览）都由该宏门控；切片
+// 编进来时同样打开，否则这些分支看不出来，桩也会变成未使用。/ The S31-only
+// branches inside the present/tick slices (component warm-up stamp, page preview)
+// are gated by this macro, so the unit turns it on; otherwise those branches
+// vanish and their stubs read as unused.
+#define KIIKO_BOARD_METALIO47 1
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -49,7 +59,8 @@ static bool s_widget_pending,s_time_pending;
 static struct tm s_widget_date,s_widget_shown,s_time_date;
 static int64_t s_widget_stamp=-1,s_time_stamp=-1;
 static int time_paints;
-static int E0470_WAVEFORM,E0470_FOLLOW_WAVEFORM,widget=APP_HOME_FOLDER,s_view=HOME_ROOT;
+static int E0470_WAVEFORM,E0470_FOLLOW_WAVEFORM,s_view=HOME_ROOT;
+static app_home_component_t widget=APP_HOME_FOLDER;
 static const int hold_gray=1,hold_binary=2;
 static const int *pushed_wave;
 static int pushed_mode;
@@ -60,7 +71,7 @@ static bool s_clock_pending,s_home_force_full_once,s_press_pending,fail,s_readin
 static int64_t s_clock_minute=-2,minute=100;
 static int paints,clock_paints,pushes,fulls,clock_faces,record_reads;
 static struct tm s_date={.tm_year=126,.tm_yday=285},date={.tm_year=126,.tm_yday=285};
-static int app_settings_home_component(void){return widget;}
+static app_home_component_t app_settings_home_component(void){return widget;}
 static bool fast;
 static bool app_settings_main_fast_refresh(void){return fast;}
 static int64_t ui_nav_clock_minute(void){return minute;}
@@ -83,7 +94,7 @@ static void guard_draw_result(void *hl,enum EpdDrawError result){(void)hl;(void)
 static enum EpdDrawError update_display_full(void *hl){(void)hl;++fulls;return EPD_DRAW_SUCCESS;}
 static enum EpdDrawError update_display_fast_page(void *hl){(void)hl;return EPD_DRAW_SUCCESS;}
 static void render(app_ctx_t *ctx,uint8_t *fb){(void)ctx;(void)fb;++paints;}
-'''+('\nstatic int64_t s_component_warm_after_ms;\nstatic int64_t fake_clock_us;\nstatic int64_t esp_timer_get_time(void){return fake_clock_us;}\n' if 'esp_timer_get_time' in present else '')+helpers+'\n'+present+'\n'+tick+r'''
+'''+('\nstatic int64_t s_component_warm_after_ms;\nstatic int64_t fake_clock_us;\nstatic int64_t esp_timer_get_time(void){return fake_clock_us;}\n' if 'esp_timer_get_time' in present else '')+pause+'\n'+helpers+'\n'+present+'\n'+tick+r'''
 int main(void){assert(!display_pipeline_enabled());
  app_ctx_t ctx={0};present(&ctx,APP_REDRAW_FULL);assert(s_clock_minute==100&&paints==1&&fulls==1);
  for(int i=0;i<100;++i)assert(on_tick(&ctx)==APP_REDRAW_NONE);

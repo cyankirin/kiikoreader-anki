@@ -67,6 +67,13 @@ static const char*app_settings_font_path(void){return reader_path;}
 static void app_settings_set_system_font_path(const char*p){if(!write_fail)snprintf(system_path,sizeof(system_path),"%s",p);}
 static void app_settings_set_font_path(const char*p){++reader_writes;if(!write_fail)snprintf(reader_path,sizeof(reader_path),"%s",p);}
 static void app_font_activate_system(void){++system_activations;}
+// 显式选字体会先解除「异常启动内建锁」，那是 app_font_context.c 里的纯状态翻转
+// （s_user_choice / s_rejected 记录）；本探针只覆盖版面、命中与随后的激活，最小
+// 桩即可。/ An explicit pick first releases the built-in lock an abnormal boot set;
+// that is a pure state flip in app_font_context.c (s_user_choice / s_rejected
+// bookkeeping), and this probe only covers layout, hits and the activation that
+// follows, so a minimal stub is enough.
+static void app_font_allow_user_choice(void){}
 static void ui_text_set_system_scale(bool b){assert(b);}
 static int s_font_page,s_main_scroll,s_style_scroll,s_ble_scroll,s_ble_learning;
 static bool s_font_sync_confirm,s_config_confirm,s_boot_pending,s_reset_confirm,s_reset_pending,s_panel_repair_pending;
