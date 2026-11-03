@@ -34,6 +34,9 @@ on:
       - flash/anki/releases.json
       - main/ota_online.h
       - boards/pico/board.json
+      - docs/CHANGELOG.md
+      - docs/anki-changelog.md
+      - docs/anki-flash-guide.md
       - flash/Pico-update*.bin
       - flash/firmware.bin
       - firmware/**
@@ -49,6 +52,7 @@ on:
       - flash/release-assets.json
       - tools/stage_public_flash.py
       - tools/stage_anki_flash.py
+      - tools/stage_changelog.py
       - tools/verify_flash_bundle.py
       - tools/package_flash.py
       - .github/workflows/pages.yml
@@ -77,10 +81,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate and stage public flashing files
         run: python3 tools/stage_public_flash.py _site
-      # 中文：暂存会现场生成 /anki/ 的清单与 bin，这里再用 --check 复核一遍结果。
-      # English: Staging generates the /anki/ manifest and binaries; re-check the result.
+      # 中文：暂存会现场生成 /kiikoread-anki/ 的清单、更新日志与 bin，这里再用 --check 复核一遍结果。
+      #      设备端 OTA 的 anki-update.json 与 Pico-anki-<版本>.bin 仍在站点根，不受这次改动影响。
+      # English: Staging generates the /kiikoread-anki/ manifest, changelog and binaries; re-check
+      #      the result. The device OTA pair (anki-update.json plus Pico-anki-<version>.bin) stays
+      #      at the site root and is untouched by this move.
       - name: Re-check the Anki web-flash bundle
-        run: python3 tools/stage_anki_flash.py _site/anki --check --ota-dir _site
+        run: python3 tools/stage_anki_flash.py _site/kiikoread-anki --check --ota-dir _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

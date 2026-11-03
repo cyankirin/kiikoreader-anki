@@ -4,7 +4,7 @@
 
 固件文件：固件随仓库提供 —— [`firmware/Read_Pico-0.3.3-rc104.01.bin`](../firmware/Read_Pico-0.3.3-rc104.01.bin)（**当前可用来源**，只烧应用分区 0x10000）。若本仓库的 **Releases** 页面发布了对应版本，优先使用 Release 附件（含版本说明）；需要回滚时可用 [`firmware/Read_Pico-0.3.3-rc103.01.bin`](../firmware/Read_Pico-0.3.3-rc103.01.bin)、[`firmware/Read_Pico-0.3.3-rc102.01.bin`](../firmware/Read_Pico-0.3.3-rc102.01.bin) 或 [`firmware/Read_Pico-0.3.3-rc100.02.bin`](../firmware/Read_Pico-0.3.3-rc100.02.bin)。
 
-> **更省事的方式（网页刷机）**：用电脑上的 Chrome 或 Edge 打开 <https://cyankirin.github.io/kiikoreader-anki/anki/>，数据线连接墨水屏后一键刷入 —— 引导程序、分区表、应用与启动槽标记一次写完；写入前会多出一步「**Erase device**」询问，**复选框默认不勾选，保持不勾再点 Next 就保留设备数据**（设置与阅读进度不丢），刷完无需恢复出厂、也无需还原配置（勾选它才是整片擦除，别勾）。本页只是入口，写盘由浏览器（WebSerial）完成，需要 HTTPS 环境。点下按钮后，页面会先把四个部件各下载一次并逐个核对 `manifest.json` 里的 SHA-256、尺寸与芯片/版本身份，四项全部一致才打开串口写入；任何一项不一致都会立即中止，设备内容不受影响（该清单与固件由本仓库构建产物现场生成，发布前另有一道 CI 校验）。
+> **更省事的方式（网页刷机）**：用电脑上的 Chrome 或 Edge 打开 <https://cyankirin.github.io/kiikoreader-anki/kiikoread-anki/>，数据线连接墨水屏后一键刷入 —— 引导程序、分区表、应用与启动槽标记一次写完；写入前会多出一步「**Erase device**」询问，**复选框默认不勾选，保持不勾再点 Next 就保留设备数据**（设置与阅读进度不丢），刷完无需恢复出厂、也无需还原配置（勾选它才是整片擦除，别勾）。本页只是入口，写盘由浏览器（WebSerial）完成，需要 HTTPS 环境。点下按钮后，页面会先把四个部件各下载一次并逐个核对 `manifest.json` 里的 SHA-256、尺寸与芯片/版本身份，四项全部一致才打开串口写入；任何一项不一致都会立即中止，设备内容不受影响（该清单与固件由本仓库构建产物现场生成，发布前另有一道 CI 校验）。
 > 仍然想手动控制每一次写入，或想先回到干净的官方基线，就按下面的三步走。
 
 ---

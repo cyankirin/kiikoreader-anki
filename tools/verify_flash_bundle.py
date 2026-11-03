@@ -32,6 +32,19 @@ ANKI_OTA_NOTES_MAX = 383          # char notes[384] on the device
 ANKI_OTA_IMAGE_MAX = 0x400000     # PICO_OTA_IMAGE_MAX for the pico layout
 ANKI_RELEASE_LIMIT = 4
 
+# 中文：Anki 版刷机页在站点上的目录，以及旧地址（只放跳转页）。两者都由
+#      tools/stage_public_flash.py 生成，check_anki_site() 负责保证「新目录齐全 + 旧地址仍能跳转」。
+# English: The Anki flasher's directory on the site, plus the legacy path that now only serves a
+#      redirect. Both are written by tools/stage_public_flash.py and check_anki_site() keeps
+#      "the new directory is complete" and "the old address still redirects" true together.
+ANKI_SITE_DIR = "kiikoread-anki"
+ANKI_LEGACY_DIR = "anki"
+ANKI_REDIRECT_TARGET = "../kiikoread-anki/"
+# 中文：新目录必须齐全的五件：页面、浏览器端校验、清单、版本目录、更新日志页。
+# English: The five files the new directory must always carry: the page, the browser-side
+#          verifier, the manifest, the rollback catalog and the changelog page.
+ANKI_SITE_FILES = ("index.html", "integrity.js", "manifest.json", "releases.json", "changelog.html")
+
 
 def release_url_valid(url: str) -> bool:
     """Mirror `pico_release_url_valid()` in main/ota_release.c.
@@ -322,16 +335,52 @@ def check_anki_bundle(folder: Path) -> dict:
     return manifest
 
 
+def check_anki_site(site: Path) -> None:
+    """Check the published layout: the new directory is complete, the old one redirects.
+
+    中文：两条断言，缺一条都会让线上出现「打不开的地址」或「刷到旧固件的地址」：
+          ① `/kiikoread-anki/` 里五件齐全 —— 页面、浏览器端校验模块、清单、版本目录、
+             更新日志页（少了 integrity.js 页面还能打开，但点刷机会直接中止）；
+          ② 旧的 `/anki/` 只剩一个跳转页，且**真的**指向 `../kiikoread-anki/`；
+             没有它，以前发出去的链接就是 404；指向别处，用户就会被送到过期的清单。
+    English: Two assertions; missing either publishes a dead address or a stale one:
+          ① `/kiikoread-anki/` carries all five files — page, browser verifier, manifest,
+             rollback catalog and changelog page (without integrity.js the page still opens
+             but the install button can only abort);
+          ② the old `/anki/` holds a redirect page that really points at `../kiikoread-anki/`.
+             Without it every link already handed out 404s; pointing elsewhere sends people to
+             an out-of-date manifest.
+    """
+    folder = site / ANKI_SITE_DIR
+    missing = [name for name in ANKI_SITE_FILES if not (folder / name).is_file()]
+    assert not missing, (
+        f"{folder} is missing {', '.join(missing)}; the Anki page, its verifier, the manifest, "
+        f"the rollback catalog and the changelog must be published together")
+    legacy = site / ANKI_LEGACY_DIR / "index.html"
+    assert legacy.is_file(), (
+        f"missing the legacy redirect page {legacy}; the old /anki/ address would 404")
+    redirect = legacy.read_text(encoding="utf-8")
+    # 中文：只认真正的跳转语句，不认散文里的地址：注释或说明文字里提到新目录不算数。
+    # English: Match the real redirect, not prose: a mention in a comment or a paragraph is
+    #      not a redirect.
+    assert re.search(
+        r"<meta\s+http-equiv=[\"']refresh[\"'][^>]*url=\s*\.\./kiikoread-anki/", redirect), (
+        f"{legacy} must redirect to {ANKI_REDIRECT_TARGET}")
+    assert f"href=\"{ANKI_REDIRECT_TARGET}\"" in redirect, (
+        f"{legacy} needs a plain link to {ANKI_REDIRECT_TARGET} for readers with JS/refresh off")
+    print(f"Anki site layout verified: /{ANKI_SITE_DIR}/ complete, /{ANKI_LEGACY_DIR}/ redirects")
+
+
 def check_anki_ota(site: Path, anki: Path | None = None) -> dict:
     """Validate the device OTA pair published at the site root.
 
     中文：设备只接受站点根下的扁平 `.bin`，所以清单里的 url、清单本身的位置、以及那个 bin
-          必须三者一致；bin 还必须与 `/anki/` 里烧写的应用镜像**同字节**，否则同一版本
-          会出现「网页刷的」和「OTA 推的」两套固件。
+          必须三者一致；bin 还必须与 `/kiikoread-anki/` 里烧写的应用镜像**同字节**，否则同一
+          版本会出现「网页刷的」和「OTA 推的」两套固件。
     English: The device only accepts a flat `.bin` at the site root, so the manifest's url,
           the manifest's own location and that binary must agree. The binary must also be
-          byte-identical to the application image flashed from `/anki/`, or one version would
-          ship two different firmwares depending on the update path.
+          byte-identical to the application image flashed from `/kiikoread-anki/`, or one
+          version would ship two different firmwares depending on the update path.
     """
     manifest_path = site / ANKI_OTA_MANIFEST
     assert manifest_path.is_file(), f"missing the Anki OTA manifest at {manifest_path}"
@@ -359,7 +408,7 @@ def check_anki_ota(site: Path, anki: Path | None = None) -> dict:
     assert data[48:80].split(b"\0")[0].decode("ascii") == version, "OTA image version mismatch"
     if anki is not None:
         assert (anki / "firmware.bin").read_bytes() == data, (
-            "the OTA image and the /anki/ application image must be the same bytes")
+            f"the OTA image and the /{ANKI_SITE_DIR}/ application image must be the same bytes")
     print(f"Anki OTA feed verified: {version} -> {feed['url']}")
     return feed
 

@@ -12,14 +12,81 @@ import sys
 from urllib.parse import urlparse
 
 from verify_flash_bundle import (check, check_archived_releases, check_anki_bundle,
-                                  check_anki_ota, check_anki_releases)
+                                  check_anki_ota, check_anki_releases, check_anki_site)
 from release_assets import hydrate
 from metalio_release_assets import stage_metalio
 from stage_anki_flash import stage as stage_anki, verify as verify_anki
+from stage_changelog import stage as stage_changelog
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FLASH = ROOT / "flash"
+
+# 中文：Anki 版刷机页的发布目录。地址从 `/anki/` 迁到 `/kiikoread-anki/`：`anki` 这个名字
+#      在本站根下与设备端的 `anki-update.json` 太像，用户也分不清「刷机页」与「OTA 清单」。
+#      旧地址不删——那里改放一个跳转页，已经发出去的链接和书签都还能用。
+# English: Where the Anki flasher lives on the published site. The address moved from
+#      `/anki/` to `/kiikoread-anki/` because `anki` sat right next to the device's
+#      `anki-update.json` and read like the OTA manifest. The old path is not removed: it now
+#      carries a redirect page, so links and bookmarks that are already out there still work.
+ANKI_DIR = "kiikoread-anki"
+ANKI_LEGACY_DIR = "anki"
+ANKI_REDIRECT_TARGET = "../kiikoread-anki/"
+ANKI_CANONICAL_URL = "https://cyankirin.github.io/kiikoreader-anki/kiikoread-anki/"
+
+# 中文：旧地址 /anki/ 的跳转页。`meta refresh` 负责自动跳，正文里的链接负责刷新被禁用的
+#      情况，`canonical` 让搜索引擎把两台地址合成一个。三种手段都指向同一个新目录。
+# English: The redirect page that keeps /anki/ alive. `meta refresh` moves the browser, the
+#      body link covers readers with refresh disabled, and `canonical` folds the two addresses
+#      into one for search engines. All three point at the same new directory.
+LEGACY_REDIRECT_PAGE = """<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>kiikoread · Anki 刷机页已迁移</title>
+<link rel="canonical" href="{canonical}">
+<meta http-equiv="refresh" content="0; url={target}">
+<meta name="robots" content="noindex">
+<style>
+  body {{ margin: 0; padding: 56px 20px; background: #fff; color: #111;
+         font: 16px/1.7 -apple-system, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif; }}
+  main {{ max-width: 520px; margin: 0 auto; }}
+  a {{ color: #111; text-underline-offset: 3px; }}
+</style>
+</head>
+<body>
+<main>
+  <p>Anki 版刷机页已经搬到 <a href="{target}">/kiikoread-anki/</a>，正在自动跳转。</p>
+  <p>如果没有自动跳转，请点上面的链接；旧地址不再提供刷机清单，避免刷到过期的固件。</p>
+</main>
+</body>
+</html>
+"""
+
+
+def write_legacy_redirect(directory: Path) -> Path:
+    """Publish the redirect page that keeps the old `/anki/` address working.
+
+    中文：只留下 index.html，其余旧文件一律不再发布——留着旧清单与 bin 会让人以为
+          `/anki/` 仍然能刷机，而那一份已经不再跟随固件版本更新。
+    English: Keep only index.html. Every other old file is dropped: leaving the stale manifest
+          and binaries behind would suggest `/anki/` still flashes, while that copy no longer
+          follows the firmware version.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    for stale in directory.iterdir():
+        if stale.name == "index.html":
+            continue
+        if stale.is_dir():
+            shutil.rmtree(stale)
+        else:
+            stale.unlink()
+    page = directory / "index.html"
+    page.write_text(LEGACY_REDIRECT_PAGE.format(target=ANKI_REDIRECT_TARGET,
+                                               canonical=ANKI_CANONICAL_URL),
+                    encoding="utf-8")
+    return page
 
 
 class LocalLinks(HTMLParser):
@@ -56,15 +123,15 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     if versioned.is_file(): shutil.copy2(versioned, output / versioned.name)
     hydrate(FLASH, output)
     stage_metalio(FLASH, output)
-    # 中文：本 fork 的 Anki 版入口（/anki/）。清单与 bin 每次现场生成：优先用本次构建的
-    #      包，没有构建包时用上面已校验过的站点镜像做基础部件、用 firmware/ 里入库的应用
-    #      镜像，因此版本库中不需要保存重复的二进制。生成后仍要过两道校验才允许发布。
-    # English: This fork's Anki entry (/anki/). The manifest and binaries are generated on
-    #      every run: from this build's package when present, otherwise from the verified
-    #      staging image (base parts) plus the committed app image in firmware/. Nothing
-    #      duplicated has to live in git, and two verifiers gate the result.
+    # 中文：本 fork 的 Anki 版入口（/kiikoread-anki/）。清单与 bin 每次现场生成：优先用本次
+    #      构建的包，没有构建包时用上面已校验过的站点镜像做基础部件、用 firmware/ 里入库的
+    #      应用镜像，因此版本库中不需要保存重复的二进制。生成后仍要过两道校验才允许发布。
+    # English: This fork's Anki entry (/kiikoread-anki/). The manifest and binaries are
+    #      generated on every run: from this build's package when present, otherwise from the
+    #      verified staging image (base parts) plus the committed app image in firmware/.
+    #      Nothing duplicated has to live in git, and two verifiers gate the result.
     if (FLASH / "anki" / "index.html").is_file():
-        anki_output = output / "anki"
+        anki_output = output / ANKI_DIR
         anki_output.mkdir(parents=True, exist_ok=True)
         shutil.copy2(FLASH / "anki" / "index.html", anki_output / "index.html")
         # 中文：页面用相对路径 import 浏览器端校验模块，必须一起发布，否则刷机按钮
@@ -88,6 +155,17 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
         anki_manifest = check_anki_bundle(anki_output)
         check_anki_ota(output, anki_output)
         check_anki_releases(anki_output, anki_manifest["version"])
+        # 中文：更新日志页与本 fork 的刷机页同目录发布，页面顶部的「更新日志」由 ./changelog.html
+        #      直接指向它；生成后立刻过闸门（版本对齐、两个分区、条目非空）。
+        # English: The changelog page ships next to this fork's flasher, so the page's top-level
+        #      "changelog" link can be a plain ./changelog.html; it is gated right after it is
+        #      written (version in step, both sections present, entries non-empty).
+        stage_changelog(anki_output)
+        # 中文：旧地址 /anki/ 只留一个跳转页，把已经发出去的链接接到新目录上。
+        # English: The old /anki/ path keeps a redirect page, so already-published links land
+        #      on the new directory instead of a 404.
+        write_legacy_redirect(output / ANKI_LEGACY_DIR)
+        check_anki_site(output)
     # 保留已发布版本的固定下载地址，避免旧清单缓存或正在进行的更新突然遇到 404。
     # Keep immutable published URLs so cached manifests and in-flight updates do not suddenly get a 404.
     for upgrade in FLASH.glob("Pico-update-*.bin"):
@@ -140,11 +218,15 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
     shutil.copy2(ROOT / "LICENSE", output / "LICENSE")
     (output / ".nojekyll").touch()
 
-    # 中文：/anki/ 只在本次暂存过时才检查，避免上游没有该入口时误报。
-    # English: Only inspect /anki/ when it was staged, so upstream checkouts stay valid.
+    # 中文：/kiikoread-anki/ 只在本次暂存过时才检查，避免上游没有该入口时误报。
+    # English: Only inspect /kiikoread-anki/ when it was staged, so upstream checkouts stay valid.
     pages = ["index.html", "notices.html", "manual.html", "manual/index.html", "metalio/index.html"]
-    if (output / "anki" / "index.html").is_file():
-        pages.append("anki/index.html")
+    if (output / ANKI_DIR / "index.html").is_file():
+        pages.append(f"{ANKI_DIR}/index.html")
+    if (output / ANKI_DIR / "changelog.html").is_file():
+        pages.append(f"{ANKI_DIR}/changelog.html")
+    if (output / ANKI_LEGACY_DIR / "index.html").is_file():
+        pages.append(f"{ANKI_LEGACY_DIR}/index.html")
     for page in pages:
         links = LocalLinks()
         links.feed((output / page).read_text(encoding="utf-8"))
@@ -152,7 +234,15 @@ def stage(output: Path, ota_origin: str | None = None) -> None:
             parsed = urlparse(link)
             if parsed.scheme or parsed.netloc or not parsed.path:
                 continue
-            target = (output / Path(page).parent / parsed.path).resolve()
+            # 中文：以 `/` 开头的是站点绝对路径，要相对**站点根**解析；按页面相对路径解析会
+            #      跑到盘符根上（Windows 上 `Path('x') / '/'` 直接变成 `\`），把正确链接判成断链。
+            # English: A leading `/` is a site-absolute path and must resolve against the site
+            #      root. Resolving it like a page-relative path lands on the drive root (on
+            #      Windows `Path('x') / '/'` is just `\`) and reports a good link as broken.
+            if parsed.path.startswith("/"):
+                target = (output / parsed.path.lstrip("/")).resolve()
+            else:
+                target = (output / Path(page).parent / parsed.path).resolve()
             if target.is_dir(): target = target / 'index.html'
             assert target.is_relative_to(output.resolve()) and target.is_file(), (
                 f"broken local link in {page}: {link}")
