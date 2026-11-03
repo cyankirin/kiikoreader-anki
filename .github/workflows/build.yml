@@ -31,39 +31,6 @@ jobs:
           python3 tools/board_layer_host_test.py
           python3 tools/board_selection_host_test.py
           python3 tools/board_source_view.py --board pico --tests --output build/host/pico
-      - name: S31 pipeline, power and cache regressions
-        shell: bash
-        run: |
-          python3 tools/test_s31_pipeline_lut.py
-          python3 tools/test_s31_lcd_interrupt_guard.py
-          python3 tools/test_s31_dma_chain.py
-          python3 tools/test_s31_line_queue.py
-          python3 tools/test_s31_radio_margin.py
-          python3 tools/test_home_minute_present.py
-          bash tools/run_metalio_cover_cache_host_test.sh
-          python3 tools/board_source_view.py --board metalio47 --tests --output build/host/metalio47
-          python3 build/host/metalio47/tools/metalio_vcom_host_test.py
-          python3 build/host/metalio47/tools/test_glass_geometry.py
-          python3 build/host/metalio47/tools/metalio_clock_cache_host_test.py
-      - name: S31 sleep, power-off and unlock boundaries
-        shell: bash
-        working-directory: build/host/metalio47
-        run: |
-          python3 tools/metalio_sleep_host_test.py
-          python3 tools/metalio_light_transaction_host_test.py
-          python3 tools/metalio_deep_sleep_host_test.py
-          python3 tools/metalio_poweroff_host_test.py
-          python3 tools/metalio_boot_wake_host_test.py
-          python3 tools/metalio_lock_key_host_test.py
-          python3 tools/metalio_lock_resume_host_test.py
-          python3 tools/metalio_mount_resume_host_test.py
-          python3 tools/txt_utf16_host_test.py
-          python3 tools/metalio_wake_media_recovery_host_test.py
-          python3 tools/metalio_power_choice_host_test.py
-          python3 tools/settings_layout_font_host_test.py
-          mkdir -p build/book-tests
-          cc -std=c11 -D_DEFAULT_SOURCE -DKIIKO_BOARD_METALIO47=1 -Wall -Wextra -Werror -fsanitize=address,undefined -Itools/settings_backup_stubs -Imain tools/boot_state_host_test.c -o build/book-tests/boot-state
-          build/book-tests/boot-state
       - name: Water-turn, display recovery, navigation and waveform regressions
         shell: bash
         working-directory: build/host/pico
@@ -88,8 +55,6 @@ jobs:
           python3 tools/pager_host_test.py
           python3 tools/quick_layer_raster_host_test.py
           python3 tools/test_epd_difference_bounds.py --check-regression
-          python3 tools/test_s31_pie_dispatch.py
-          python3 tools/test_lcd_frame_lifecycle.py
           sh tools/run_app_loop_host_tests.sh
           python3 tools/reader_spacing_host_test.py
           python3 tools/test_book_toc.py
@@ -112,8 +77,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [pico, metalio47]
-    # v6.1 includes both Xtensa S3 and RISC-V S31; never share their build/config directories.
+        board: [pico]
+    # 本 fork 只为 Pico（RDP-G01-W / ESP32-S3）出固件并做门禁；metalio47 源码保留以便与上游合并，
+    # 但不再参与构建与测试矩阵（用户 2026-11-03 明确要求）。
+    # This fork ships and gates only the Pico board (ESP32-S3). metalio47 sources stay in
+    # the tree for upstream merges but are no longer built or tested here.
     container: espressif/idf:v6.1
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +109,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        board: [pico, metalio47]
+        board: [pico]
     steps:
       - uses: actions/checkout@v4
       - name: Select Clang for sanitizer host regressions

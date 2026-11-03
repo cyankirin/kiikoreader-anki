@@ -99,6 +99,11 @@ static void reader_font_choice_finish(void){}
 static app_redraw_t select_reading_font_item(app_ctx_t*ctx,const ttf_font_item_t*p){(void)ctx;selected=(int)(p-fonts);return APP_REDRAW_PAGE;}
 '''
 unit += layout
+# 设置页 on_gesture 切片里会调用 fork 新增的字体选择授权钩子；这里给最小桩，
+# 保持原有断言不变（该钩子只翻转 app_font_context 的内部状态）。
+# The sliced on_gesture body calls the fork's font-choice hook; stub it so the
+# unit stays self-contained without touching any assertion.
+unit += 'static void app_font_allow_user_choice(void){}\n'
 for name in ('settings_viewport_end', 'settings_stacked', 'system_font_layout', 'system_font_item_rect'):
     unit += function(name, settings) + '\n'
 unit += 'static void system_paint(void){uint8_t pixel=0;uint8_t*fb=&pixel;' + paint + '}\n'

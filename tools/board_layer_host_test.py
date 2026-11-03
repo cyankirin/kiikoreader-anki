@@ -111,6 +111,14 @@ def check_root_has_no_board_copies(problems):
         fail(problems, f'root {stray.name} duplicates a board partition table')
 
 
+def fork_supported(board):
+    """中文：本 fork 是否仍为该板出固件并做门禁。缺省 true 以便上游新增板型自动纳入。
+    English: whether this fork still builds and gates the board; defaults to true so
+    boards coming from upstream are covered automatically."""
+    info = json.loads((board / 'board.json').read_text(encoding='utf-8'))
+    return info.get('fork_supported', True) is not False
+
+
 def check_ci_matrix(problems, boards):
     workflow = ROOT / '.github/workflows/build.yml'
     if not workflow.is_file():
@@ -120,11 +128,15 @@ def check_ci_matrix(problems, boards):
     if not matrices:
         fail(problems, 'CI has no board matrix; the layer would ship untested')
         return
-    expected = {board.name for board in boards}
+    supported = {board.name for board in boards if fork_supported(board)}
+    unsupported = {board.name for board in boards if not fork_supported(board)}
     for entry in matrices:
         listed = {item.strip() for item in entry.split(',') if item.strip()}
-        if listed != expected:
-            fail(problems, f'CI matrix {sorted(listed)} does not match boards/ {sorted(expected)}')
+        if listed != supported:
+            fail(problems, f'CI matrix {sorted(listed)} does not match the supported boards {sorted(supported)}')
+        stray = listed & unsupported
+        if stray:
+            fail(problems, f'CI matrix still builds {sorted(stray)}, which board.json marks unsupported')
 
 
 def check_docs(problems, boards):

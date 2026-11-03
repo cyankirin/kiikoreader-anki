@@ -9,5 +9,6 @@
   "sdkconfig": "sdkconfig.defaults",
   "partitions": "partitions.csv",
   "settings_namespace": "metalio_s31",
-  "online_ota": true
+  "online_ota": true,
+  "fork_supported": false
 }

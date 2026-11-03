@@ -31,6 +31,10 @@ enum {ESP_OK=0,ESP_ERR_INVALID_SIZE=-1,ESP_ERR_INVALID_ARG=-2,ESP_FAIL=-3,ESP_ER
 typedef struct {int id;} app_desc_t;
 typedef struct {const app_desc_t *request_app;} app_ctx_t;
 const app_desc_t app_book={1},app_image={2};
+// 本 fork 新增了 .apkg 入口：文件浏览在打开选中项时会先问 Anki 模块要不要接管。
+// The fork added an .apkg entry: opening a selection first asks the Anki module.
+const app_desc_t app_anki={3};
+static bool app_anki_request_open(const char *path){(void)path;return false;}
 typedef struct {bool mounted;uint64_t free_bytes;} read_pico_sd_info_t;
 #define FILE_MAX 96
 enum {FILE_VIEW_LIST,FILE_VIEW_MOVE};
@@ -57,6 +61,9 @@ static bool app_image_request_open(const char *path){check_payload(path);strcpy(
 static int ttf_font_open(const char *path){check_payload(path);strcpy(opened,path);++font_opens;return ESP_OK;}
 static void app_settings_set_system_font_path(const char *path){assert(!strcmp(path,opened));}
 static void app_font_activate_system(void){}
+// 设置页 on_gesture 切片会调用 fork 新增的字体选择授权钩子；此处给最小桩，断言不变。
+// The sliced settings on_gesture calls the fork's font-choice hook; stub only.
+static void app_font_allow_user_choice(void){}
 static bool moved_settings_fit(const char *from,const char *to){assert(!strcmp(from,s_selected.path)&&strcmp(from,to));return true;}
 static void sync_moved_settings(const char *from,const char *to){assert(!strcmp(from,s_selected.path));check_payload(to);}
 static void notify_moved_tree(const char *from,const char *to,unsigned depth){assert(!depth&&!strcmp(from,s_selected.path));check_payload(to);}
