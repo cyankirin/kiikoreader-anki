@@ -56,8 +56,11 @@ on:
       - tools/verify_flash_bundle.py
       - tools/package_flash.py
       - .github/workflows/pages.yml
-  release:
-    types: [published]
+  # 中文：发布 Release 时不再重复部署 —— 内容与触发它的那次 push 完全一致，
+  #       重复跑只会和 push 的部署抢同一个 Pages 并发组（已出现无失败步骤的 deploy 失败）。
+  # / Do not redeploy on release: the content matches the push that produced it, and the
+  #   duplicate run only contends for the same Pages concurrency group (it failed once
+  #   with every step green).
   workflow_dispatch:
 
 permissions:
