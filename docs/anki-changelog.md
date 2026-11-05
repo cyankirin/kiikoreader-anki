@@ -42,6 +42,8 @@
 ### 已知限制
 - 首次升级到本版本仍需网页刷机或线刷（通道本身在该固件里）；此后可在设备上联网更新。
   The first hop to this build still needs the web flasher or a cable (the channel lives inside this firmware); later updates run on the device.
+- 应用镜像 **4,113,824 B / 4,194,304 B**，余量仅 **80 KB（1.9%）**。上游这版把内建字库扩到 7668 字，几乎吃满分区；后续加功能前必须先腾空间（例如按需裁剪未用字形或下线旧回退包）。
+  The app image is 4,113,824 B of a 4,194,304 B partition — 80 KB (1.9%) left. Upstream's 7668-glyph expansion nearly filled it, so free space before adding features (trim unused glyphs or retire old rollback bundles).
 - S31（metalio47）不再构建与门禁，源码保留以便合并上游。
   The S31 board is no longer built or gated; its sources stay for upstream merges.
 
