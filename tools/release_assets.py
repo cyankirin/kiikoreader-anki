@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 import hashlib
 import json
+import random
 import re
 import shutil
 import time
@@ -50,16 +51,24 @@ def _hydrate_files(source: Path, output: Path, release: dict, maximum: int = 0x4
             shutil.copy2(cached, target)
             continue
         url = REPO + release['tag'] + '/' + asset
-        for attempt in range(3):
+        # 中文：GitHub 偶尔对 Release 直链返回 504，部署因此中断过多次；下载失败按指数退避
+        #       重试（5/10/20/40 秒 + 抖动），但校验失败属于真实不一致，必须立刻失败。
+        # / GitHub intermittently answers Release downloads with 504, which used to abort
+        #   the deploy. Retry transport failures with exponential backoff (5/10/20/40 s plus
+        #   jitter), but let a checksum/length mismatch fail immediately — that is real.
+        data = None
+        for attempt in range(5):
             try:
-                # Size cap also applies to a malicious/unexpected upstream response.
-                # 大小上限也约束非预期响应，避免无限读入内存。
-                with urlopen(Request(url, headers={'User-Agent':'kiikoread-publisher'}), timeout=30) as response:
+                with urlopen(Request(url, headers={'User-Agent': 'kiikoread-publisher'}), timeout=60) as response:
                     data = response.read(info['size'] + 1)
-                assert len(data) == info['size'] and hashlib.sha256(data).hexdigest() == info['sha256'], 'Release asset checksum mismatch'
-                target.write_bytes(data)
-                fetched[asset] = target
                 break
-            except Exception:
-                if attempt == 2: raise
-                time.sleep(5)
+            except Exception as exc:
+                if attempt == 4:
+                    raise
+                delay = min(40, 5 * (2 ** attempt)) + random.uniform(0, 2)
+                print(f'  retry {name} in {delay:.1f}s after {type(exc).__name__}: {exc}', flush=True)
+                time.sleep(delay)
+        assert data is not None
+        assert len(data) == info['size'] and hashlib.sha256(data).hexdigest() == info['sha256'], 'Release asset checksum mismatch'
+        target.write_bytes(data)
+        fetched[asset] = target
