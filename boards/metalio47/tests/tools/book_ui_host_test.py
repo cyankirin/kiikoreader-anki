@@ -215,7 +215,9 @@ static delete_retry_t* s_delete_retries;
 static char s_latest_path[288],test_last_path[288];
 static bool s_save_failed;
 static char s_path[288],s_requested_open[288];
-static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen;
+static bool s_requested_open_home,s_reader_return_home,s_requested_fullscreen,s_requested_resume_mode;
+static bool app_settings_reader_default_fullscreen(void){return false;}
+static bool app_settings_set_reader_default_fullscreen(bool on){(void)on;return true;}
 static int test_open_calls;
 static char* s_text;
 static int s_unsaved,s_px=48,s_margin=36,s_line_spacing=130;
@@ -356,6 +358,8 @@ static void book_layout_set_typography(int tracking){(void)tracking;}
 static void book_layout_set_first_line_indent(unsigned em){(void)em;}
 static void book_layout_set_first_line_indent_adjust(int px){(void)px;}
 static void book_layout_set_reading_line(int style){(void)style;}
+static bool app_settings_book_reading_line_full(void){return false;}
+static void book_layout_set_reading_line_full(bool full){(void)full;}
 static void book_layout_set_reading_line_offset(int offset){(void)offset;}
 static void book_layout_set_images_visible(bool visible){test_images_visible=visible;}
 static bool test_book_vertical;
@@ -492,10 +496,10 @@ int main(void) {
         assert(book_reader_tap_direction(body,body.x,body.y,false,true)==1);
         assert(book_reader_tap_direction(body,body.x+body.width-1,body.y,false,true)==-1);
         book_reader_tap_t tap={0};
-        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==BOOK_READER_TAP_FULLSCREEN);
-        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,false,false,1000)==book_reader_tap_direction(body,342,600,false,false));
+        assert(book_reader_tap_feed(&tap,body,340,600,true,false,1250)==book_reader_tap_direction(body,340,600,true,false));
         assert(!book_reader_tap_tick(&tap,2000,false));
-        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==BOOK_READER_TAP_FULLSCREEN);
+        assert(book_reader_tap_feed(&tap,body,342,600,true,false,3000)==book_reader_tap_direction(body,342,600,true,false));
         assert(!book_reader_tap_tick(&tap,3341,false));
         assert(!book_reader_tap_tick(&tap,4000,false));
     }
@@ -583,7 +587,8 @@ int main(void) {
     for(int im=0;im<2;++im){
         test_reader_immersive=im;s_reader_fullscreen=false;
         EpdRect reading_body=reader_area(),text_body=body_rect(),footer=progress_rect();
-        assert(reading_body.y==176&&reading_body.height==872&&text_body.y==176&&text_body.height==872);
+        assert(reading_body.y==176&&reading_body.height==872);
+        assert(text_body.y==(im?24:80)&&text_body.y+text_body.height==(im?1202:1168));
         assert(footer.y==1048&&footer.height==48);
         s_reader_fullscreen=true;reading_body=reader_area();text_body=body_rect();footer=progress_rect();
         assert(reading_body.y==(im?0:80)&&reading_body.y+reading_body.height==(im?1204:1168));
@@ -859,12 +864,12 @@ int main(void) {
     assert(apply_reader_option(&ctx,0)==APP_REDRAW_PAGE&&test_power_turn);
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL);
     s_reader_fullscreen=false;
-    assert(apply_reader_option(&ctx,1)==APP_REDRAW_PAGE&&!s_reader_fullscreen&&test_reader_immersive&&s_page==1);
+    assert(apply_reader_option(&ctx,1)==APP_REDRAW_FULL&&!s_reader_fullscreen&&test_reader_immersive&&s_page==1);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
-    assert(test_image_preparations==1&&test_reflows==1);
+    assert(test_image_preparations==2&&test_reflows==2);
     test_reflow_failures=1;
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&test_hide_images&&!test_images_visible&&s_page==1);
-    assert(test_reflows==3&&test_image_preparations==1);
+    assert(test_reflows==4&&test_image_preparations==2);
     assert(apply_reader_option(&ctx,2)==APP_REDRAW_PAGE&&!test_hide_images&&test_images_visible&&s_page==1);
     test_hold_action=APP_READER_KEY_HOME;test_nav_target=-1;
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_PAGE && test_nav_target==-1 && s_view==SHELF);
@@ -921,7 +926,7 @@ with tempfile.TemporaryDirectory() as tmp:
     c = Path(tmp) / "test.c"
     exe = Path(tmp) / "test"
     c.write_text(unit, encoding="utf-8")
-    subprocess.run(["gcc", "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
+    subprocess.run(["cc", "-std=c11", "-D_DEFAULT_SOURCE", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
                     "-Wno-unused-function", "-fsanitize=address,undefined", "-I", str(source.parents[1] / "ui"), "-I", str(source.parents[1] / "book"),
                     str(c), str(source.parents[1] / "ui/ui_text_edit.c"), "-o", str(exe)], check=True)
     subprocess.run([str(exe)], check=True)

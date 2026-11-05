@@ -23,6 +23,28 @@
         fails when the log and the firmware version drift apart.
 -->
 
+## 0.3.3-rc105.01 — 2026-11-05
+
+### 新增
+- 合并上游 `v0.3.3-rc105`：内建字库扩到 7668 字符（缺字回退、16 级灰阶补字、缩放边缘与逐字墨量校正），默认全屏、紧凑阅读线按钮、稳定的上下操作栏与分页，修复书架分页箭头。
+  Merged upstream v0.3.3-rc105: 7668 embedded glyphs with fallback, 16-level supplements and per-glyph ink calibration, plus default fullscreen, compact guide controls, stable reader chrome/pagination and shelf paging fixes.
+- Pico 局部刷新按精确像素边界屏蔽，沉浸阅读普通翻页不再把页脚未读进度线带进灰阶重驱；后缓冲只提交实际刷新范围。
+  Pico partial updates are masked to exact pixel bounds so an immersive body turn no longer re-drives the unread footer progress track; only the scanned bounds are committed.
+
+### 修复
+- 合并冲突逐项处置：CI 恢复为只门禁 Pico、`board.json` 增 `fork_supported`、`docs/CHANGELOG.md` 与语言包双源合并、PR59 驱动基线按**索引 blob**（LF，与 CI 一致）重算 22 项覆盖。
+  Resolved the merge conflicts item by item: CI gates the Pico board only, `board.json` carries `fork_supported`, both changelog and locale sources were merged, and the PR59 driver baseline was recomputed from index blobs (LF, as CI sees them) for 22 overrides.
+
+### 保留
+- Anki：`.apkg` 导入、复习与学习记录；系统升级的「Anki 版联网升级」通道与官方通道并存；网页刷机 `/kiikoread-anki/` 的多版本选择、逐部件校验与更新日志页。
+  Kept the Anki importer/review/progress, the Anki OTA channel alongside the official one, and the `/kiikoread-anki/` flasher with version picker, per-part verification and changelog.
+
+### 已知限制
+- 首次升级到本版本仍需网页刷机或线刷（通道本身在该固件里）；此后可在设备上联网更新。
+  The first hop to this build still needs the web flasher or a cable (the channel lives inside this firmware); later updates run on the device.
+- S31（metalio47）不再构建与门禁，源码保留以便合并上游。
+  The S31 board is no longer built or gated; its sources stay for upstream merges.
+
 ## 0.3.3-rc104.02 — 2026-11-03
 
 ### 新增

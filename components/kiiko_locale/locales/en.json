@@ -153,6 +153,7 @@
   "按键控制": "Key controls",
   "自定义三键": "Customise keys",
   "全屏沉浸": "Immersive mode",
+  "默认全屏": "Default full screen",
   "关闭书内图片": "Hide book images",
   "跳过正文插图，保留原书文件": "Skip inline images and keep the original book",
   "竖排（从右到左）": "Vertical (right to left)",
@@ -402,6 +403,7 @@
   "暖光": "Warm",
   "前光": "Frontlight",
   "触摸振动": "Touch vibration",
+  "快充": "Fast charge",
   "恢复出厂设置": "Factory reset",
   "重置系统偏好、资料卡、WiFi、蓝牙配对和锁屏密码。": "Reset preferences, profile, Wi-Fi, Bluetooth pairings and lock PIN.",
   "保留书籍、字体、图片、阅读记录和硬件校准。": "Keep books, fonts, images, reading history and hardware calibration.",
@@ -1200,5 +1202,11 @@
   "选择通道，连上 WiFi 后检查新版本": "Pick a channel, connect Wi-Fi, then check for updates",
   "正在下载 Anki 版，短暂断网会自动重连": "Downloading the Anki build; a short drop reconnects automatically",
   "正在连接并检查 Anki 版更新": "Connecting and checking the Anki build",
-  "Anki 版清单获取失败，请稍后重试": "Anki build manifest unavailable; try again later"
+  "Anki 版清单获取失败，请稍后重试": "Anki build manifest unavailable; try again later",
+  "保持浅睡": "Keep light sleep",
+  "锁屏后保持浅睡，不自动关机": "Stay in light sleep when locked",
+  "中间单击全屏 · 全屏按区域翻页 · 上滑返回": "Tap centre for fullscreen · Tap regions to turn · Swipe up for tools",
+  "范围": "Span",
+  "跟随文字": "Follow text",
+  "整行": "Full line"
 }

@@ -16,6 +16,7 @@
 #include "ui_avatar.h"
 #include "book_cover_jobs.h"
 #include "metalio_hw.h"
+#include "metalio_charger.h"
 #include "metalio_sleep.h"
 #include "ble_page_turner.h"
 #include "driver/usb_serial_jtag.h"
@@ -346,8 +347,8 @@ static void lock_hint_end(void) {
     s_lock_hint_hl=NULL;
 }
 
-// 锁屏先浅睡，十分钟后同步外挂RTC并硬关机；USB/输入和交接失败保持锁定。
-// Light-sleep locks, then sync the external RTC and power off after ten minutes; failed handoffs retain the gate.
+// 锁屏策略可保持浅睡或到时关机；USB/输入和交接失败保持锁定。
+// Lock policy may remain in light sleep or power off on deadline; failed handoffs retain the gate.
 app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeout_ms) {
     if (!(book_cover_jobs_quiesce(2000) && ui_avatar_quiesce(2000))) return APP_WAKE_TIMEOUT;
     const int64_t start=esp_timer_get_time();
@@ -360,8 +361,9 @@ app_wake_source_t app_light_sleep_wait_timed(sc7a20h_handle_t acc,uint32_t timeo
     metalio_frontlight(0,50);
     app_wake_source_t wake=APP_WAKE_NONE;
     bool usb_was_blocked=metalio_usb_blocks_sleep();
-    const int64_t off_delay=app_settings_staged_shutdown()?APP_LOCK_OFF_AFTER_US:1;
-    int64_t off_at=s_lock_sleep_touch&&!timeout_ms ? start+off_delay : 0;
+    const int64_t off_delay=app_settings_keep_light_sleep()?0:
+        app_settings_staged_shutdown()?APP_LOCK_OFF_AFTER_US:1;
+    int64_t off_at=s_lock_sleep_touch&&!timeout_ms&&off_delay ? start+off_delay : 0;
     int64_t off_retry_at=off_at;
     bool frame_marked=false,frame_mark_attempted=false;
     unsigned light_failures=0;
@@ -511,6 +513,10 @@ static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t tou
     // Defer active mount/write transactions; absent or failed media is not active IO.
     esp_err_t media_state=read_pico_sd_get_info(&info);
     if(media_state==ESP_ERR_NOT_FINISHED || (media_state!=ESP_OK && info.mounted)) return media_state;
+    // 浅睡准备与恢复全程会使用 I2C/电源轨；先挂起充电监控，避免其插入这些事务。
+    // Light-sleep preparation and restoration use I2C and rails; suspend the charger monitor first
+    // so it cannot interleave with those transactions.
+    metalio_charger_suspend();
     bool touch_asleep=false,sd_closed=false,lcd_stopped=false,keys_ready=false,rails_cut=false,pins_prepared=false;
     uint16_t saved_rails=0;
     bool key_irq=false,power_confirmed=false;
@@ -618,6 +624,9 @@ static esp_err_t lock_light_sleep_once(sc7a20h_handle_t acc,cst836u_handle_t tou
         if(lock_take_key_wakeup())*key_wake=true;
         else if(err==ESP_OK)err=ESP_ERR_INVALID_STATE;
     }
+    // 外设与按键恢复完成后再恢复充电监控，避免其插入恢复期的 I2C 事务。
+    // Resume the charger monitor only after peripheral/key restoration so it cannot interleave.
+    metalio_charger_resume();
     // 恢复失败仍保持锁屏；仅真正的电源键可交给PIN/解锁逻辑。
     // Restore failure retains the lock; only a real power wake reaches PIN/unlock handling.
     ESP_LOGI(TAG,"S31 light restore: result=%s power_wake=%u",esp_err_to_name(err),*key_wake);
@@ -641,6 +650,10 @@ static esp_err_t lock_power_off(void) {
     if(err==ESP_OK)err=ttf_font_suspend_io();
     bool sd_closed=false;
     if(err==ESP_OK) { err=read_pico_sd_sync();sd_closed=err==ESP_OK; }
+    // 关机事务（按键暂停、EPD 掉电、扩展口断电）前挂起充电监控；失败回滚后恢复。
+    // Suspend the charger monitor before the key pause/EPD rail/expander power-off transaction;
+    // resume it on failure rollback.
+    metalio_charger_suspend();
     bool keys_paused=false;
     if(err==ESP_OK) {
         err=read_pico_pmu_keys_pause();
@@ -657,6 +670,7 @@ static esp_err_t lock_power_off(void) {
     if(sd_closed)(void)read_pico_sd_remount();
     (void)lock_resume_media_io(500);
     metalio_haptic_resume();
+    metalio_charger_resume();
     return err;
 }
 
@@ -679,6 +693,11 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
         return ESP_ERR_INVALID_STATE;
     }
+    // 深睡准入完成、电源/总线事务开始前挂起充电监控；成功入睡由下次启动重新初始化，
+    // 失败回滚必须在本函数返回前恢复，避免监控永久停摆。
+    // Suspend the charger monitor once deep-sleep admission passed and the power/bus transaction
+    // starts; a real sleep re-initializes on next boot, while a failed rollback must resume it here.
+    if (mode == APP_SLEEP_DEEP) metalio_charger_suspend();
     (void)app_sync_time_to_pmu();
     app_lock_font_t saved_font = {0};
     app_font_begin_lock(&saved_font);
@@ -692,6 +711,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if (mode == APP_SLEEP_DEEP) {
             lock_restore_key_wake();
             (void)lock_resume_media_io(15000);
+            metalio_charger_resume();
         }
         app_font_end_lock(&saved_font);
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
@@ -725,6 +745,7 @@ esp_err_t app_enter_host_sleep(app_sleep_mode_t mode) {
         if(touch_asleep) (void)cst836u_wake(s_lock_sleep_touch);
         app_font_end_lock(&saved_font);
         metalio_haptic_resume();
+        metalio_charger_resume();
         if(restore_radios) { ble_pt_resume_after_sleep(); read_pico_transfer_resume_after_sleep(); }
         return err;
     }
@@ -825,6 +846,12 @@ bool lock_pin_grace_active(void) {
     const uint32_t locked_at=app_settings_pin_locked_at();
     if(now<1704067200 || now>4102444799LL || locked_at<1704067200 || (uint64_t)now<locked_at)return false;
     return (uint64_t)now-locked_at<(uint64_t)app_settings_pin_grace_minutes()*60u;
+}
+
+// 唤醒只清完整物理目标，不裁成UI区域，也不修改面板参考帧或增加全刷。
+// Clear the full physical wake target, without UI cropping, reference changes or an extra refresh.
+static void lock_clear_wake_target(EpdiyHighlevelState *hl) {
+    memset(epd_hl_get_framebuffer(hl), 0xFF, (size_t)(epd_width() / 2) * epd_height());
 }
 
 void enter_lock_and_sleep(
@@ -937,7 +964,7 @@ void enter_lock_and_sleep(
     // 仅清目标画布，保留面板和真实参考帧；当前页接着单次重绘，无额外白屏。
     // Clear only the target canvas, retaining panel/reference history for the next page presentation.
     read_pico_pmu_drain_events();
-    epd_hl_set_all_white(hl);
+    lock_clear_wake_target(hl);
     read_pico_pmu_drain_events();
     if (ignore_until_ms) {
         *ignore_until_ms = esp_timer_get_time() / 1000 + APP_LOCK_IGNORE_BOOT_MS;

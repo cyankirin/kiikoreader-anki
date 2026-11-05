@@ -4,6 +4,7 @@
 # English: Native list painting, aspect-fill covers, two-line bounds and a native preview.
 import argparse
 from pathlib import Path
+from font_hanzi_host_support import font_hanzi_host_sources
 import subprocess
 import tempfile
 from home_cover_cache_host_test import function
@@ -11,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[1]
 a=argparse.ArgumentParser();a.add_argument('--font',type=Path,default=ROOT/'main/assets/builtin.ttf');a.add_argument('--covers',type=Path);a.add_argument('--output',type=Path);args=a.parse_args()
 with tempfile.TemporaryDirectory() as folder:
  p=Path(folder)
- (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
+ (p/'esp_err.h').write_text('#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_FAIL -1\n#define ESP_ERR_NO_MEM 0x101\n#define ESP_ERR_NOT_FOUND 0x105\n#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108\n')
  (p/'esp_log.h').write_text('#pragma once\nstatic inline void host_log(const char *tag,const char *fmt,...){(void)tag;(void)fmt;}\n#define ESP_LOGI(...) host_log(__VA_ARGS__)\n#define ESP_LOGW(...) host_log(__VA_ARGS__)\n#define ESP_LOGE(...) host_log(__VA_ARGS__)\n')
  (p/'esp_timer.h').write_text('#pragma once\n#include <stdint.h>\nstatic inline int64_t esp_timer_get_time(void){return 0;}\n')
  (p/'esp_heap_caps.h').write_text('''#pragma once
@@ -167,7 +168,7 @@ int main(int argc,char **argv){
  (p/'test.c').write_text(unit)
  flags=['cc','-std=gnu11','-Wall','-Wextra','-Werror','-Wno-unused-variable','-Wno-unused-function','-Wno-missing-field-initializers','-fsanitize=address,undefined','-ffunction-sections','-fdata-sections','-I'+str(p),'-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main/font'),'-I'+str(ROOT/'main')]
  subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(p/'ttf.o')],check=True)
- subprocess.run(flags+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/ui/ui_image_dither.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)
+ subprocess.run(flags+font_hanzi_host_sources(ROOT,p)+[str(p/'test.c'),str(p/'assets.c'),str(p/'ttf.o'),str(ROOT/'main/ui/ui_gesture.c'),str(ROOT/'main/ui/ui_image_dither.c'),'-Wl,-dead_strip','-lm','-o',str(p/'test')],check=True)
  if args.covers or args.output:
   from PIL import Image
  for i in range(4):

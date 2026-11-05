@@ -18,7 +18,7 @@ typedef struct {bool consumed,user_activity;int64_t now_ms;} app_ctx_t;
 typedef enum {UI_GESTURE_SWIPE_U,UI_GESTURE_SWIPE_D,UI_GESTURE_SWIPE_L,UI_GESTURE_SWIPE_R,UI_GESTURE_TAP,UI_GESTURE_CANCEL,UI_GESTURE_PRESS,UI_GESTURE_MOVE} ui_gesture_type_t;
 typedef struct {ui_gesture_type_t type;unsigned x0,y0,x,y;} ui_gesture_event_t;
 typedef enum {APP_REDRAW_NONE,APP_REDRAW_PAGE,APP_REDRAW_FULL} app_redraw_t;
-enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_BACKGROUND_PREVIEW};
+enum {READING,SHELF,READER_PANEL_NONE,READER_PANEL_TOOLS,READER_PANEL_FONT_SETTINGS,READER_PANEL_LAYOUT_SETTINGS,READER_PANEL_BACKGROUND_PREVIEW,READER_PANEL_RULE_SETTINGS};
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,s_reader_slider=3,s_pressed_control=2;
@@ -28,7 +28,7 @@ static struct {bool pending;} s_reader_tap;
 static int64_t s_stats_activity_ms,s_reader_notice_until;
 static unsigned invalidations;
 static void invalidate_prep(void){++invalidations;}
-static void pause_reader_prep(void){++invalidations;}
+void pause_reader_prep(void){++invalidations;}
 static bool locked,aa=true,raster_aa=true,save_fail;
 static void lock_draw(void){assert(!locked);locked=true;}
 static void unlock_draw(void){assert(locked);locked=false;}
@@ -63,7 +63,9 @@ static bool tools_swipe(app_ctx_t *ctx,const ui_gesture_event_t *ev){
 '''
 
 unit+=function('book_reader_center',ROOT/'main/book/book_reader_input.h')+'\n'
+unit+='static bool reader_page_image_hit(int x,int y){(void)x;(void)y;return false;}\n'
 unit+='static EpdRect body_rect(void){return(EpdRect){0,176,684,872};}\n'
+unit+='#define UI_READER_TOOLS_TOP 1096\nstatic EpdRect reader_area(void){return(EpdRect){0,176,684,872};}\nstatic app_redraw_t reader_panel_action(app_ctx_t *ctx,int x,int y){(void)ctx;(void)x;(void)y;return APP_REDRAW_NONE;}\n'
 unit+='static int s_footnote_note=-1,footnote_candidate=-1;static EpdRect s_footnote_marker;\nstatic int reader_footnote_hit(int x,int y,EpdRect *r){(void)x;(void)y;(void)r;return footnote_candidate;}\n'
 center=function('action_at',book)
 a=center.index('        if (s_footnote_note >= 0)')
@@ -74,6 +76,26 @@ a=action.index('        if (ui_rect_hit(s_antialias_card, x, y)) {')
 b=action.index('        if (ui_rect_hit(layout, x, y)) {',a)
 unit+='static app_redraw_t tap_aa(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
 unit+=r'''
+static int rule_style=1,rule_offset,raster_rule_style=1,raster_rule_offset;
+static bool rule_full,raster_rule_full;
+static int app_settings_book_reading_line(void){return rule_style;}
+static void app_settings_set_book_reading_line(uint8_t style){rule_style=style;}
+static void book_layout_set_reading_line(unsigned style){raster_rule_style=style;}
+static bool app_settings_book_reading_line_full(void){return rule_full;}
+static bool app_settings_set_book_reading_line_full(bool full){if(save_fail)return false;rule_full=full;return true;}
+static void book_layout_set_reading_line_full(bool full){raster_rule_full=full;}
+static int app_settings_book_reading_line_offset(void){return rule_offset;}
+static void app_settings_set_book_reading_line_offset(int8_t offset){rule_offset=offset;}
+static void book_layout_set_reading_line_offset(int offset){raster_rule_offset=offset;}
+'''
+for name in ['s_rule_offset_up','s_rule_offset_reset','s_rule_offset_down']:
+ unit+=re.search(r'^static const EpdRect '+name+r' = .*',s,re.M)[0]+'\n'
+unit+=function('rule_style_rect',book)+'\n'+function('rule_span_rect',book)+'\n'
+a=action.index('    if (s_reader_panel == READER_PANEL_RULE_SETTINGS) {')
+b=action.index('    if (s_reader_panel == READER_PANEL_FONT_PICKER)',a)
+unit+='static app_redraw_t tap_rule(int x,int y){\n'+action[a:b]+'return APP_REDRAW_NONE;}\n'
+
+unit+=r'''
 static void reset(app_ctx_t *ctx){
  s_footnote_note=footnote_candidate=-1;
  s_view=READING;s_text="text";s_reader_panel=READER_PANEL_NONE;s_clear_confirm=s_scan_pending=false;
@@ -82,6 +104,19 @@ static void reset(app_ctx_t *ctx){
  *ctx=(app_ctx_t){.now_ms=2200};
 }
 int main(void){
+ s_reader_panel=READER_PANEL_RULE_SETTINGS;
+ assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full&&invalidations==1);
+ assert(tap_rule(330,920)==APP_REDRAW_PAGE&&!rule_full&&!raster_rule_full&&invalidations==2);
+ save_fail=true;
+ assert(tap_rule(550,920)==APP_REDRAW_NONE&&!rule_full&&!raster_rule_full&&invalidations==2);
+ save_fail=false;
+ assert(tap_rule(470,790)==APP_REDRAW_PAGE&&rule_style==2&&raster_rule_style==2);
+ assert(tap_rule(70,1040)==APP_REDRAW_PAGE&&rule_offset==-2&&raster_rule_offset==-2);
+ assert(tap_rule(280,1040)==APP_REDRAW_PAGE&&rule_offset==0&&raster_rule_offset==0);
+ assert(tap_rule(70,790)==APP_REDRAW_PAGE&&!rule_style&&!raster_rule_style);
+ assert(tap_rule(550,920)==APP_REDRAW_PAGE&&rule_full&&raster_rule_full);
+ assert(tap_rule(70,1040)==APP_REDRAW_NONE&&rule_offset==0);
+ assert(tap_rule(342,1150)==APP_REDRAW_PAGE&&s_reader_panel==READER_PANEL_FONT_SETTINGS);
  app_ctx_t ctx;ui_gesture_event_t e={.type=UI_GESTURE_SWIPE_U,.x0=342,.y0=1160,.x=342,.y=980};
  for(int vertical=0;vertical<2;++vertical)for(int immersive=0;immersive<2;++immersive){
   (void)immersive;reset(&ctx);assert(tools_swipe(&ctx,&e));
@@ -115,7 +150,7 @@ int main(void){
   reset(&ctx);s_reader_panel=panel;
   assert(center_action(&ctx,342,500)==APP_REDRAW_FULL&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
   s_reader_tap.pending=true;
-  assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&!s_reader_tap.pending);
+  assert(center_action(&ctx,342,500)==APP_REDRAW_NONE&&s_reader_fullscreen&&mode_changes==1&&s_reader_tap.pending);
  }
  // 工具栏正文注号可开关卡片，其他面板与确认框保有点击优先权。/ Body markers open/close cards while modal panels retain tap priority.
  for(int panel=READER_PANEL_NONE;panel<=READER_PANEL_BACKGROUND_PREVIEW;++panel){

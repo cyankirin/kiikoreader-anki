@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+from font_hanzi_host_support import font_hanzi_host_sources
 import struct
 import subprocess
 import tempfile
@@ -48,7 +49,7 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_NOT_FOUND 0x105
-#define ESP_ERR_INVALID_RESPONSE 0x108
+#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108
 ''')
     (work/'esp_log.h').write_text('''#pragma once
 static inline void host_log(const char *tag,const char *fmt,...){(void)tag;(void)fmt;}
@@ -258,7 +259,7 @@ int main(int argc,char **argv){
            '-I'+str(ROOT/'main/ui'),'-I'+str(ROOT/'main'),'-I'+str(ROOT/'tools/ui_gesture_stubs')]
     subprocess.run(flags+['-c',str(ROOT/'main/font/ttf_font.c'),'-o',str(work/'ttf.o')],check=True)
     gc='-Wl,-dead_strip' if os.uname().sysname=='Darwin' else '-Wl,--gc-sections'
-    subprocess.run(flags+[f'-DBOOK_LOCK_CACHE_PARENT="{work}/cache"',str(work/'test.c'),str(work/'assets.c'),
+    subprocess.run(flags+font_hanzi_host_sources(ROOT,work)+[f'-DBOOK_LOCK_CACHE_PARENT="{work}/cache"',str(work/'test.c'),str(work/'assets.c'),
                           str(work/'ttf.o'),str(ROOT/'main/ui/ui_image_dither.c'),'-lm',gc,'-o',str(work/'test')],check=True)
     subprocess.run([str(work/'test'),str(work),str(args.font.resolve()),str(work/'frame.raw')],check=True)
     raw=(work/'frame.raw').read_bytes()

@@ -34,6 +34,11 @@ esp_err_t app_settings_set_ai_short(app_ai_action_t action);
 void app_settings_set_sleep_mode(app_sleep_mode_t mode);
 const char* app_sleep_mode_name(app_sleep_mode_t mode);
 #if KIIKO_BOARD_METALIO47
+typedef enum {APP_LOCK_SLEEP_TIMED, APP_LOCK_SLEEP_OFF, APP_LOCK_SLEEP_KEEP_LIGHT} app_lock_sleep_mode_t;
+/// S31锁屏策略；保持浅睡不设置自动断电截止，手动关机独立。/ S31 lock policy; keep-light has no automatic power-off deadline, independent of manual off.
+app_lock_sleep_mode_t app_settings_lock_sleep_mode(void);
+esp_err_t app_settings_set_lock_sleep_mode(app_lock_sleep_mode_t mode);
+bool app_settings_keep_light_sleep(void);
 /// S31关机：默认浅睡十分钟后同步RTC并硬关机；false立即断电，保存后生效。/ S31 syncs RTC and powers off after ten minutes of light sleep; false powers off immediately, effective after saving.
 #else
 /// 电源菜单“关机”：false 为彻底断电，true 为先浅睡 10 分钟再由 PMU 软睡断电。
@@ -141,6 +146,10 @@ void app_settings_set_reader_turn_effect(uint8_t effect);
 /// 阅读正文里短按电源键翻下一页；默认关闭。/ Short power press turns forward only in reader body; off by default.
 bool app_settings_reader_power_turn(void);
 void app_settings_set_reader_power_turn(bool on);
+/// 新开书使用的全屏偏好；锁屏恢复遵从记录。/ Fresh-entry preference; lock/resume keeps its recorded state.
+bool app_settings_reader_default_fullscreen(void);
+/// 保存成功后才更新偏好。/ Apply the preference only after a successful save.
+bool app_settings_set_reader_default_fullscreen(bool on);
 /// 沉浸全屏时隐藏阅读状态栏。/ Hide the reader status bar in immersive full screen.
 bool app_settings_reader_immersive(void);
 void app_settings_set_reader_immersive(bool on);
@@ -196,6 +205,9 @@ void app_settings_set_shelf_recent_sort(bool on);
 /// by default. Turning it off tears the whole stack down and returns NimBLE's memory.
 bool app_settings_ble_turner(void);
 void app_settings_set_ble_turner(bool on);
+/// S31快充：默认开启；关闭回到标准充电电流，切换立即生效并掉电保存。/ S31 fast charge: on by default; off returns to the standard current, and the choice persists.
+bool app_settings_fast_charge(void);
+void app_settings_set_fast_charge(bool on);
 /// 字间距默认0px，31档以0居中。/ Default 0px, centered among 31 tracking stops.
 #define APP_BOOK_TRACK_MIN (-15)
 #define APP_BOOK_TRACK_MAX 15
@@ -212,6 +224,9 @@ void app_settings_set_book_indent_adjust(int8_t px);
 /// 正文阅读线：0 无，1 虚线，2 点线。/ Body reading guides: none, dashed or dotted.
 uint8_t app_settings_book_reading_line(void);
 void app_settings_set_book_reading_line(uint8_t style);
+/// 阅读线范围，false 跟随文字，true 整行/整列；提交成功才生效。/ Guide span, applied after commit.
+bool app_settings_book_reading_line_full(void);
+bool app_settings_set_book_reading_line_full(bool full);
 /// 阅读线相对默认位置 -8..+8 像素，2 像素一步，默认 0。/ Guide offset in 2 px steps.
 int8_t app_settings_book_reading_line_offset(void);
 void app_settings_set_book_reading_line_offset(int8_t offset_px);

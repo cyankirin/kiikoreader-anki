@@ -82,7 +82,10 @@ int main(void) {
     assert(bands && bands->phases == gray_table->phases && bands->phase_times == gray_table->phase_times);
     assert(bw && bw->phases == 20);
     for (int f = 0; f < bw->phases; ++f) {
-        assert(e0470_phase_action(bw, f, 0, 0) == 0);
+        // 官方v2.0.69：完整DU表末四相给黑→黑补黑；其余相保持不驱动。
+        // Vendor v2.0.69 re-drives black in the last four complete-DU phases; other phases hold.
+        const int black_redrive = f >= bw->phases - 4;
+        assert(e0470_phase_action(bw, f, 0, 0) == (black_redrive ? 1 : 0));
         assert(e0470_phase_action(bw, f, 15, 15) == 0 || e0470_phase_action(bw,f,15,15)==2);
     }
     int original_diagonal = 0;
@@ -149,7 +152,10 @@ int main(void) {
         if(to==15&&from==15){assert(action==0||action==2);white_pushes+=action==2;}
     }
     for(int f=0;f<20;++f){int action=e0470_phase_action(binary,f,15,15);assert(action==0||action==2);binary_white+=action==2;}
-    assert(white_pushes>=3&&binary_white>0);
+    // 48相模式关闭本地白底补帧后，等白维护只剩厂家white tick的一相；裁剪档仍有3相。
+    // With the full-48 profile the local white pulses are off, leaving only the vendor white
+    // tick; the trimmed profile still keeps three.
+    assert(white_pushes>=(E0470_WAVEFORM_TRIM?3:1)&&binary_white>0);
     puts("PASS: page white maintenance stays separate from fixed-navigation/slider equal holds");
     // 点阵亮度随输入单调增加且稳定，不引入中灰；阅读插图原16灰输出仍保留。
     // Dot brightness increases monotonically and remains stable with no intermediate grays; existing 16-gray reader output is retained.

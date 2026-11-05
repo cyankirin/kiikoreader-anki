@@ -286,11 +286,11 @@ Child layouts use the1216px viewport: extend file lists, bottom-anchor directory
 
 ## S31传输与深睡恢复
 
-大于等于四个接收块的上传可使用两槽顺序写卡：HTTP只填空槽，单个后台任务按原顺序写入；每次最多增加一块接收块大小的PSRAM及4096字节内部任务栈，资源不足沿用单缓冲。任何接收/写入失败先等待已提交任务完成，再关闭、清理或替换文件。只在整个文件落盘关闭成功后确认提交。TCP接收窗口65535字节、接收邮箱64项，静态RX默认6/动态RX64/BA12；PSRAM传书独占会话按S31 SDK建议对照16槽静态RX/BA窗口（最大16槽），普通联网与临时对时保持原6槽。乱序队列最多12包并启用SACK，省电所有权保留；USB MSC块16KiB、TF四线20MHz，始终电脑/固件独占挂载。
+大于等于四个接收块的上传可使用最多四槽顺序写卡：HTTP只填空槽，单个后台任务按原顺序写入；接收块最大64KiB，最多增加三块PSRAM及4096字节内部任务栈，PSRAM不足回退双槽，再不足沿用单缓冲。任何接收/写入失败先等待已提交任务完成，再关闭、清理或替换文件。只在整个文件落盘关闭成功后确认提交。TCP接收窗口65535字节、接收邮箱64项，静态RX默认6/动态RX64/BA12；PSRAM传书独占会话按S31 SDK建议对照16槽静态RX/BA窗口（最大16槽），普通联网与临时对时保持原6槽。乱序队列最多48包以覆盖65535字节窗口并启用SACK，省电所有权保留；USB MSC块16KiB、TF最高20MHz并按兼容档回退，始终电脑/固件独占挂载。
 
 深睡保留屏幕物理锁图，TF挂载尚未完成时不清白换图；有效快照恢复前后参考不额外扫描，缺失/损坏时仅对可独立生成的真实锁屏作一次完整输出。未知透明底图保留物理画面，禁用差分提示；实际解锁取消所有延迟恢复。PIN继续验证，异常启动字体保护和S31外设休眠顺序保持。入书/目录返回正文使用一次原厂GC48，后续正文22相及图形GL48各走既有路径。
 
-English: Large S31 uploads use two bounded ordered slots,one optional PSRAM block and4096B internal worker stack; resource failure falls back synchronously. Join before close/cleanup/commit on every path. TCP receive65535/mailbox64,default staticRX6/dynamicRX64/BA12 and bounded12-packet SACK. PSRAM bulk sessions compare the SDK16-slot staticRX/BA minimum (capped at16),while ordinary connectivity/time sync retain6; MSC16KiB with unchanged four-bit20MHz card timing and exclusive ownership. Preserve physical deep-lock art while media is pending; trusted snapshots restore references without scanning,unknown transparent art never receives difference hints. Cancel deferred work before unlock,retain PIN/abnormal-font/board sleep guards,and clean reader entry once with vendorGC48 without changing subsequent body or graphical waveforms.
+English: Large S31 uploads use up to four ordered64KiB slots,three optional PSRAM blocks and a4096B internal worker stack; PSRAM pressure falls back to two slots,then synchronous IO. Join before close/cleanup/commit on every path. TCP receive65535/mailbox64,default staticRX6/dynamicRX64/BA12 and bounded48-packet SACK. PSRAM bulk sessions compare the SDK16-slot staticRX/BA minimum (capped at16),while ordinary connectivity/time sync retain6; MSC16KiB with a20MHz card-clock ceiling and compatibility fallback and exclusive ownership. Preserve physical deep-lock art while media is pending; trusted snapshots restore references without scanning,unknown transparent art never receives difference hints. Cancel deferred work before unlock,retain PIN/abnormal-font/board sleep guards,and clean reader entry once with vendorGC48 without changing subsequent body or graphical waveforms.
 
 文件传输服务持有BLE网络租约，停止扫描/连接并阻止主循环重启蓝牙；关闭服务后按原设置及最近设备恢复，不清配对/学习。仅连接WiFi的常驻会话不持有该租约，仍可使用蓝牙翻页器。临时扫描/联网的失败必须回滚租约；成功启动后的任何退出都释放一次。`/info`提供固件ELF身份、实际接收预算、BLE运行状态和内部RAM余量，便于核对实机；这些诊断不提供任意命令或存储访问。
 
@@ -307,6 +307,10 @@ CI 同时编译两块板并验证芯片、项目名、分区、启动地址和�
 English: Moku's board manifest/facade design centralizes capabilities and unchanged budgets while keeping native backends and strict target/config guards. `metalio_s31` aliases stable `metalio47`. The PowerShell wrapper shares the Python materializer/build driver. CI builds both chips and validates package identities/layouts; web regressions use self-contained fixtures without publishing a site.
 
 S31 SDMMC沿用Metalio官方内部DMA中转：固定4096字节内部对齐缓冲、最多8扇区，外部RAM不直接进入SD DMA；失败挂载与成功卸载回收，卸载失败保留缓冲和卡所有权。时钟降档、四线引脚、FAT锁及USB独占流程保持。传书每两秒只对文件名/字节/进度条做局部黑白差分，失败刷新重试，网页字节发送完成后继续计时并等待设备保存确认。
+
+S31的标准TF文件访问统一计数，包括打开的文件/目录、路径操作以及传书和在线字体提交事务；卸载先阻止新访问并等待句柄归还，暂忙时保留原挂载。内部`/flash`不参加TF访问计数。VFS关闭失败仍按SDK已回收句柄处理，保留错误返回，避免拔卡后永久阻塞恢复。普通挂载和USB原始卡共用四线/单线配置、内部4096字节DMA及成功档提示；USB最高20MHz，失败继续按原兼容档降频和单线回退。TinyUSB完全停止后才回收原始卡、host和DMA，收尾失败保留所有权供重试。现有健康检查、自动恢复、休眠引脚和阅读波形保持。
+English: S31 counts SD VFS files/directories, path operations and upload/font commit transactions. Unmount blocks new access and waits for admitted work; busy transitions retain the mount. Internal `/flash` is independent. Failed VFS closes release accounting because the SDK recycles handles, while errors remain visible. VFS/USB share bus configuration, internal4096B DMA and known-good profiles; USB caps at20MHz and retains lower-clock/single-bit fallback. Raw resources are released only after TinyUSB stops; failed cleanup retains ownership for retry. Health/recovery, sleep pins and reader waveforms retain their existing behavior.
+
 
 显式本地`--s31-transfer-startup-test`仅用于无人值守对照，启动仍保留PIN/恢复门禁，随后进入已保存网络的传书页。正常构建强制关闭并在manifest/verification记录该开关；此测试包不得交付。
 
@@ -389,3 +393,18 @@ Both boards share setup, system localization, recursive file search/grid/batch a
 
 阅读UI决定正文和信息栏范围；调用PR59已有差分/整块出口及原阅读波形，空闲后独立更新底部信息。不重新引入旧的d74b180驱动或本地缓存保护。`tools/pr59_driver_baseline_host_test.py`核验216个底层、配置及波形文件与用户指定PR提交一致。
 Reader UI owns body/metadata bounds and calls PR59's existing difference/full-area APIs and reader waveforms, updating footer metadata after idle. Do not reintroduce the d74b180 drivers or the superseded local cache guard. The driver-baseline host test verifies216 low-level/config/waveform files against the selected PR commit.
+
+阅读触屏规则（2026-11-02）：非全屏中间单击进入全屏；全屏后所有正文区域按所选左右/上下分区翻页。图片单击延后340ms以识别双击；非全屏中间图片的单击进入全屏，其他未放大图片单击按分区翻页。双击正文或整页图片放大/退出，已放大图片单击不翻页。底部上滑仍回到非全屏并共同显示标题操作行与工具栏；弹窗/工具栏优先于图片点按。
+Reader taps2026-11-02: standard centre taps enter fullscreen; fullscreen body taps follow the selected horizontal/vertical regions. Image singles wait340ms for double-tap zoom; standard centre image singles enter fullscreen and other unzoomed singles turn. Zoomed singles do not turn. Bottom swipes restore standard header/tools together; modal/tool controls take priority over image taps.
+
+
+## S31保持浅睡与字体恢复
+
+关机睡眠提供“浅睡10分钟后关机”“彻底断电”“保持浅睡”三项。保持浅睡不设置锁屏自动断电截止；定时维护仍维持现有浅睡及TF/屏幕停放，真实按键与PIN规则保持。充电/拔线不会给保持浅睡补造断电截止，电源菜单手动关机仍直接关机。既有shutdown_mode键以0/1兼容旧选项，2表示保持浅睡；便携备份沿用已有sleep字段，无格式变更。设置写入失败保留当前策略。
+
+唤醒IO未恢复时保留字体槽和原选择，不把“暂缓切换”当加载失败而卸载。已验证的唤醒/挂卡会话清除旧拒绝记录；解析、I/O或内存失败按1/3/10/30秒退避，多次持续失败后每5分钟复查，避免永久拒绝或频繁重载。异常启动保护和不覆盖已保存字体选择的规则保持。
+
+English: S31 lock power offers timed10-minute off,immediate off and keep-light. Keep-light has no automatic power-off deadline,including after cable changes; hardware light-sleep maintenance,physical wake/PIN and manual power-off retain existing paths. The existing shutdown_mode key retains0/1 and adds2; portable backups use the existing sleep field without a format change. Failed saves retain live policy. Pending wake font slots survive deferred activation. Verified wake/mount sessions clear old rejection; all load failures retry after1/3/10/30seconds,then every5minutes for persistent faults. Abnormal-boot protection and saved choices remain intact. Transfer performance requires device/network measurements; diagnostic queue/receive/write times and selected SD profiles are available in the existing info endpoint.
+
+Pico开机书架扫描保留原目录递归与首屏分组封面；每64本共用一次只读NVS进度会话，约2.5KiB PSRAM工作区不足或打开失败时回到逐本读取。目录已核验的普通文件大小/修改时间用于同版EPUB元数据缓存键，减少重复stat，大小/时间/版本失配仍拒绝；明确为普通非图书文件的目录项提前跳过stat，未知类型仍核验。加入时间索引采用有界16KiB stdio缓冲，不改记录、排序、封面缓存版本或硬件参数。Pico的shelf scan日志分列目录/进度/加入索引耗时，实际整机增幅须实测。
+Pico cold shelves keep recursive discovery and grouped covers. Up to64 progress queries share a read-only NVS session; bounded scratch/OOM/session failures fall back per book. Reuse directory-validated size/mtime for unchanged EPUB metadata keys, retaining mismatch rejection; known regular non-books skip redundant stat while unknown types remain checked. The first-added journal uses bounded16KiB stdio buffering without format/order/cache-version/hardware changes. Pico scan logs separate directory, progress and journal costs; device throughput still requires measurement.

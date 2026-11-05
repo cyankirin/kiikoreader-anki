@@ -1,5 +1,92 @@
 # 版本变更 / Changelog
 
+## Pico 0.3.3-rc105 / Metalio S31 0.3.3-rc110 — 2026-11-04
+
+- 两板内建覆盖7668字符，正文缺字回退、16级灰阶补字、缩放边缘及逐字墨量校正；保留系统字形与导入字体。支持默认全屏、紧凑阅读线按钮和稳定的上下操作栏/分页，修复书架分页箭头。
+  Both boards cover7668 characters with missing-glyph fallback,16-level supplements, scaled-edge and per-glyph ink calibration, retaining UI and imported faces. Include Default fullscreen, compact guide controls, stable reader chrome/pagination and shelf paging fixes.
+- 保留已合并的Pico阅读裁剪及Moku双板刷新方案。S31同步行首/启动对齐、完整物理唤醒目标清理、USB排空后卸载、后台换字体及有界渐进JPEG；保留TF降频兼容/自动恢复、唤醒字体恢复、路由器传书优化和保持浅睡。
+  Preserve merged Pico crop fixes and Moku refresh policies. S31 adds row/start alignment, physical wake-target clearing, drained USB teardown, detached font replacement and bounded progressive JPEG, retaining SD fallback/recovery, wake-font recovery, router transfer work and Keep-light sleep.
+- 官网USB、TF及联网OTA同步发布；保留原Pico rc104/S31 rc109刷机与下载入口、所有历史字节及现有分区。默认保留设置与进度；S31刷机不再检查旧固件品牌。
+  Publish matching web/TF/OTA builds, retaining original rc104/rc109 install/download entries, historic bytes and partitions. Preserve settings/progress by default; S31 no longer checks current-firmware branding.
+
+## 本地测试 / Local test — 2026-11-04
+
+- S31内建补字对齐Pico：同样7668字覆盖、16级灰阶、源字宽、缩放边缘与逐字墨量校正，保留全部界面字形、原生/外置字体和既有刷新方案。移除仅用于旧尺寸检查的未使用锁屏位图，沿用原分区及锁屏样式，仅本地测试。
+  Align S31 supplements with Pico's7668-character coverage,16-level gray, source advances, scaled edges and per-glyph ink calibration. Retain UI glyphs,native/imported faces and refresh policies; remove unused lock art formerly linked for a size check, preserving partitions and lock styles. Local test only.
+
+- S31采用行首像素与启动时序对齐，唤醒重绘覆盖完整物理边缘；USB退出确认回调排空后再卸载，失败保留资源供重试。阅读字体后台准备、提交失败保留旧字库；渐进JPEG有界分带，必要时使用自有TF临时文件并协作取消。保留既有阅读波形、TF兼容恢复及Pico，仅本地测试。
+  S31 aligns row pixels/start timing and clears the full physical wake target. Drain USB callbacks before teardown, retaining resources on failure. Prepare reader fonts off-thread with old-face rollback; progressive JPEG uses bounded bands, owned SD backing when needed and cooperative cancellation. Preserve reader waveforms, SD compatibility/recovery and Pico; local test only.
+
+- S31网页刷机取消旧应用品牌检查，可直接从当前固件更新；保留目标固件校验、机型/分区/启动槽检查和默认数据保护。
+  S31 web installation accepts the current firmware without a brand check, retaining target integrity,chip/layout/boot-slot checks and data-preservation defaults.
+
+- S31阅读波形定稿：整页刷新保持厂家完整48相；普通翻页12相擦白+4相重推黑并走单带快速引擎；48相模式关闭本地额外白/黑补帧。纯文字页对“白→中灰”改用白侧直接压黑（标定系数0.40，1~6相），灰边与黑白端点同段出现；图文/插图页按Pico整页全像素走原厂柔和翻页表，避免直推压坏插图灰阶。
+  S31 reader waveforms finalized: page refreshes keep the vendor full 48 phases; ordinary turns use twelve erase plus four black re-drive phases on the fast single-band engine, and the full-48 profile drops the local extra white/black pulses. Text-only pages push white-origin midgrays directly from white (calibrated 0.40, 1..6 phases) so gray edges settle with the endpoints; image pages follow Pico's whole-page full-pixel soft turn with the vendor table, keeping illustration tone.
+
+- Pico局部刷新精确屏蔽裁剪范围外的像素，避免沉浸阅读普通翻页把底部未读进度线带入灰阶重驱而闪黑；后缓冲只提交实际刷新范围，保留原波形与页脚延迟更新，版本号不变。
+  Mask Pico partial updates to exact pixel bounds so immersive body turns do not re-drive the unread gray progress track. Commit only the scanned bounds, retaining waveforms, deferred footer updates and existing versions.
+
+- Pico正文放大的内建补字按每字原始墨量校正灰边，改善密集笔画粘连和个别字符偏粗；保留字库覆盖、原生字形、字宽、抗锯齿及字重微调。大字号细节仍受24px补字素材限制。
+  Calibrate enlarged Pico reader supplements to each glyph's source ink, improving dense-stroke merging and uneven weight. Preserve coverage,native glyphs,advances,AA and stroke controls. Fine detail at large sizes remains limited by24px source bitmaps.
+
+- Pico与S31新增771个字符：396个汉字（包括通用规范前6500字中的缺口、姓名字与部分常见繁体）及375个标点/符号/常用字母，涵盖书名号、单双引号、圈号数字、罗马数字、拼音和Latin-1。保留原有GB2312与16级灰阶，原有轮廓和界面像素不变；精简未使用的字体布局数据以适应现有分区，S31沿用紧凑单色补字以适应现有分区；极生僻字仍需TF字体。
+  Pico and S31 add771 characters:396 Han covering common6500 gaps, selected names/traditional forms, and375 book punctuation/symbols/letters including quotes, circled/Roman numbers, pinyin andLatin-1. Preserve GB2312,16-level AA and original pixels/metrics; remove unused font layout data to fit existing partitions. S31 retains compact monochrome supplements within its existing partition; rarer glyphs still need a card font.
+
+## 本地测试 / Local test — 2026-11-03
+
+- Pico保留内建原生轮廓，缺字改用16级灰阶补字，改善混排黑度不一；开关抗锯齿分别输出灰阶与黑白，放大收窄灰边。补字使用源字体精确字宽，保留字号、笔画微调、横竖排及外置字体选择；UI字库与S31保持。
+  Pico keeps native outlines and uses16-level missing-glyph coverage to improve mixed text weight. AA switches between gray and binary ink; enlarged edges stay narrow. Use exact source advances with existing size, stroke, vertical/horizontal and face controls, preserving UI fonts and S31 behavior.
+
+- 正文缺字复用已有内建轮廓与压缩补字库，合计覆盖6763个GB2312汉字；当前字体已有字形优先，不改字体选择。补字按字号缩放并参与字重微调、横竖排和预读，字宽测量与实际绘制一致；大字形的清晰度受现有24px位图素材限制，超出已有字库的字符仍需外置字体。
+  Missing body glyphs reuse built-in outlines and the shipped compressed supplement, covering6763 GB2312 Han characters while preserving native-glyph priority and selected faces. Fallback scales with size, follows stroke adjustment, horizontal/vertical layout and prefetch, with matching measured/raster advances. Large glyph sharpness is limited by the existing24px bitmap source; characters outside the embedded coverage still require an external face.
+
+- 阅读线范围按钮缩小并与样式卡片对齐；阅读设置新增“默认全屏”，仅影响新开书，睡眠恢复保留锁屏前状态。默认关闭，与“全屏沉浸”独立，支持重启及设置备份恢复。
+  Align compact guide-range buttons with style cards. Default fullscreen changes fresh book entry only, while sleep resumes keep their recorded mode. Default off, independent of immersion, persistent across restarts and configuration restore.
+
+- S31进入阅读时先物理清白，再从白底完整绘制阅读页，增强封面和图片页对书架残影的清理；沿用现有图片清屏接口与原厂波形，后续翻页路径保持。
+  Clear the S31 panel before rendering the reader entry frame from white, improving shelf ghost cleanup on cover/image pages. Reuse the existing image-clean path and vendor waveforms; retain subsequent turn routing.
+
+- 书架四个分页箭头独立处理按下/抬手，容许边缘轻微漂移；实际翻页清除旧按压刷新标记，保留取消、扫描门禁和首末页边界。
+  Shelf pager contacts own press/release with slight edge-drift tolerance; real turns clear stale press refresh state while retaining cancellation, scan guards and page bounds.
+
+- 阅读线新增“跟随文字 / 整行”范围切换，默认跟随文字；竖排对应整列。保留虚线/点线和位置微调，选择支持重启与设置备份恢复。
+  Reading guides can follow text or span the full body row (column for vertical text), defaulting to follow text. Retain styles/offset and persist the choice across restarts and settings backups.
+
+## 本地测试 / Local test — Pico startup 2026-11-02
+
+- Pico首次书架扫描批量读取进度，复用已验证文件信息读取作者缓存，跳过已知非图书普通文件的多余查询；加入时间索引采用有界缓冲。保留现有顺序、进度、封面缓存格式与硬件参数，实际耗时待实机验证。
+  Batch Pico shelf progress, reuse validated file metadata for cached authors and avoid redundant stat calls on known non-book regular files. Buffer the first-added journal without changing order, progress, cache formats or hardware; device timing remains to be measured.
+
+## 未发布 / Unreleased — 2026-11-02
+
+## 未发布 / Unreleased — 2026-11-03
+
+- S31整页刷新恢复厂家完整48相GC16/GL16（官方v2.0.66起默认），完整DU表末四相补黑（对齐官方v2.0.69）；普通翻页对齐Pico：十二相整屏擦白后补四相重推黑，并改用单带1K相位表引擎（约12ms/相）。残影与翻页速度改善，灰度仍由原厂序列产生；可用构建开关 `--s31-trimmed-waveform` 回退到裁剪37相档做A/B。
+  S31 page refreshes use the vendor full 48-phase GC16/GL16 (official default since v2.0.66) with the official four-phase DU black re-drive (v2.0.69); ordinary reader turns match Pico's twelve whole-panel erase phases plus four black re-drive phases on the single-band 1K phase-LUT engine (~12 ms/phase). Ghosting and turn speed improve while gray levels keep the vendor sequence; `--s31-trimmed-waveform` restores the trimmed 37-phase profile for A/B.
+
+- S31与Pico的配置备份统一写到 TF 卡根目录 `Kiikoread-settings.backup`；两板都能恢复旧的 `Pico-settings.backup` 与 `Metalio-S31-settings.backup`（含各自 `.previous`），同一张卡可直接换板恢复，旧卡备份无需改名。
+  Both boards now save backups as `Kiikoread-settings.backup` in the TF card root; either board also restores the legacy `Pico-settings.backup` and `Metalio-S31-settings.backup` files (including `.previous`), so one card works across devices without renaming old backups.
+
+- Pico锁屏十分钟后深睡，单击且未设密码时承接本次按键上电，PMU未附带短按事件也无需再按一次。握手前校验启动状态与来源，握手后核对PMU会话；软件/异常复位、旧运行状态及非按键来源不采用这份证据，保留密码和双击策略，版本号不变。开机按键的延后释放由独立交接保护清理，避免慢首帧后再次锁屏。
+  Resume Pico after deep sleep with the same power-on press in single-press mode without a PIN, even without a separate SHORT event. Validate pre-handshake state/source and the completed PMU session; reject stale running state, non-key sources and software/fault resets, preserving PIN/double-click policy and firmware versions. Discard the boot gesture tail until released and drained, preventing a slow first frame from turning it into another lock action.
+
+- 阅读题头、工具栏与设置面板改为悬浮覆盖，显隐保持正文区域、分页和当前阅读位置，不再因呼出工具栏重排。同步处理插图缩放裁剪与遮挡区触摸；脚注卡片限制在可见区，打开时点击题头/工具栏先关闭脚注。保留原沉浸样式，版本号不变。
+  Overlay reader headers, tools and settings without changing body geometry, pagination or the current position. Clip image zoom and input around chrome; keep note cards within the visible viewport and dismiss an open note before handling chrome taps. Retain immersive styles and existing firmware versions.
+
+- 合并PR68的Pico水波纹擦白/补黑及53相支持，保留作者波形。修复全屏后中间点按不翻页；非全屏中间点按仍进入全屏，全屏按所选分区翻页。合并PR69插图双击缩放，并保留单击翻页、弹窗/工具栏优先权及取消边界。
+  Merge PR68's authored Pico ripple erase/redrive and53-phase support. Standard centre taps still enter fullscreen; fullscreen centre taps follow the chosen turn regions. Integrate PR69 image double-tap zoom while retaining single turns, modal/tool priority and cancellation boundaries.
+
+## 本地测试 / Local test — 2026-11-02
+
+- S31唤醒后保留待恢复字体，解析错误也可退避重试；新增“保持浅睡”，锁屏不自动关机，手动关机保持。传书采用有界四槽队列、64KiB接收块及接收窗口配套乱序预算，连接时恢复非省电策略；速度需实机对照。
+  S31 retains pending wake fonts and retries parse failures with backoff. Keep-light locks do not auto-power-off; manual off remains available. Transfers use bounded four-slot queues,64KiB blocks, a window-sized reorder budget and no-power-save connections; hardware throughput remains to be measured.
+
+- S31统一TF文件访问与卸载保护，普通挂载及USB共用总线配置和内部DMA，保留降频/单线兼容及自动恢复；沿用rc109，仅本地测试。
+  S31 unifies SD admission/unmount protection and VFS/USB bus/internal-DMA setup, retaining fallback and automatic recovery. Local rc109 test only.
+
+- S31新增「快充」设置，默认开启（1.5A），关闭后回到标准1A充电；切换立即生效并保存，重启后保持。该项位于设置「个性化功能」分组，独立一行并带充电闪电图标。
+  S31 gains a Fast charge setting, on by default (1.5 A); turning it off returns to standard 1 A charging. The change applies and is saved immediately and persists across restarts. It is its own row in Settings > Personalization with a charging bolt icon.
+
 ## 0.3.3-rc104.01 / 2026-11-02
 
 - 合并上游 rc104（Pico `0.3.3-rc104` / Metalio S31 `0.3.3-rc109` 的在线资源），版本号 `0.3.3-rc104.01`。上游改动按新布局落在 Pico 视图（`boards/pico/src/`）与共享 `main/`，本 fork 的 Anki 与字体改动（`app_font_allow_user_choice`、行盒与 descender 度量、控制台只编到 ERROR、PSRAM 不足时暂停首页组件）在合并后全部保留。
@@ -48,6 +135,10 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 - EPUB 脚注改为弹窗：点正文注号在原处附近弹卡片显示注释，不再跳到章末；注号图标按书内 CSS 行内排进句子，卡片字号比正文小 5px 并跟随当前阅读字体。
   EPUB footnotes become a popup card anchored near the marker instead of jumping to the chapter end; inline 1em markers follow the book CSS, and the card uses the reading font at body size minus 5 px.
+
+
+- Pico 阅读水波纹翻页补上残影清理：在定稿保持前加入 12 相全屏擦白和 4 相重推黑，和普通翻页一致，减少翻页后的淡墨与残影。
+  Pico water-ripple page turns now run the same ghost cleanup as ordinary turns: twelve whole-panel erase phases plus four black re-drive phases before the settle holds.
 
 
 - 阅读默认非全屏，顶部恢复时间、签名和电量，章节与进度放在工具栏上方；进入即显示工具栏。中间单击只进入全屏，底部上滑退出全屏并显示工具栏，保留阅读锚点及原全屏样式。
@@ -124,6 +215,14 @@ Retain original Pico rc103/S31 rc108 web/TF entries, kiikoread.com as the sole w
 
 
 ## 未发布 / Unreleased
+
+- Pico 深睡唤醒后不再多按一遍：锁屏 10 分钟转深睡后，上电短按已经算一次唤醒，恢复阅读只需再按一次；设置双击唤醒时由 3 下减为 2 下，普通浅睡锁屏仍遵循双击/单次设置。
+  After Pico deep sleep, one press powers the host and one more resumes reading (two presses total with the double-click wake setting instead of three); ordinary light-sleep locks still follow the configured single/double press.
+
+
+- 恢复插图双击缩放：双击正文/整页插图放大，再双击退出；中间空白单击仍切换全屏，翻页判定不变。
+  Restore double-tap illustration zoom: double tap zooms and a second double tap exits; centre blank taps keep the fullscreen toggle and page-turn taps are unchanged.
+
 
 - S31本地残影优化：主页面切换涉及书架补八相变白，其余补六相，保留原灰阶、固定底栏和两相释放；设置/蓝牙列表使用黑白装饰、灰阶字缘/头像，列表滚动采用本机完整48相加八相擦白及两相释放，一次区域输出，不在松手后补刷。列表优先清残影、反馈会比原黑白快刷慢，光学效果待实屏确认；阅读模式保持独立。
   S31 local ghosting work: root changes add eight changed-white phases involving the shelf or six otherwise, retaining native grays, navigation and two release holds. Settings/BLE lists use BW decoration and gray glyphs/avatars; scrolling uses native48 plus eight whites/two releases in one regional pass without release-time output. Lists favor cleanup over prior BW latency; optical acceptance remains pending and reading modes stay independent.

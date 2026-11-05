@@ -7,6 +7,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path
+from font_hanzi_host_support import font_hanzi_host_sources
 from home_cover_cache_host_test import function
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +34,7 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_NOT_FOUND 0x105
-#define ESP_ERR_INVALID_RESPONSE 0x108
+#define ESP_ERR_INVALID_STATE 0x103\n#define ESP_ERR_INVALID_RESPONSE 0x108
 ''')
     (work / 'esp_log.h').write_text('''#pragma once
 static inline void title_test_log(const char *tag,const char *fmt,...){(void)tag;(void)fmt;}
@@ -240,6 +241,6 @@ int main(int argc,char **argv){
     subprocess.run(flags + ['-Dopen=title_test_open', '-Dclose=title_test_close', '-c',
                             str(ROOT / 'main/font/ttf_font.c'), '-o', str(work / 'ttf.o')], check=True)
     gc = '-Wl,-dead_strip' if os.uname().sysname == 'Darwin' else '-Wl,--gc-sections'
-    subprocess.run(flags + [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'),
+    subprocess.run(flags +font_hanzi_host_sources(ROOT,work)+ [str(work / 'test.c'), str(work / 'assets.c'), str(work / 'ttf.o'),
                             str(ROOT / 'main/ui/ui_kit.c'), '-lm', gc, '-o', str(work / 'test')], check=True)
     subprocess.run([str(work / 'test'), str(work / 'system.ttf'), str(work / 'reader.ttf')], check=True)

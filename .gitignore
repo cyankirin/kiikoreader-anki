@@ -49,6 +49,7 @@ tools/buzzer_score_wav
 # ESP-IDF specific build outputs
 *.bin
 !main/assets/*.bin
+!/boards/pico/src/main/assets/ui-hanzi.bin
 !/flash/bootloader.bin
 !/flash/partitions.bin
 !/flash/firmware.bin
@@ -169,3 +170,7 @@ sdkconfig.bak-*
 # publishes firmware bundles under flash/ and whitelists them file by file
 # above; excluding the directory would void every one of those negations (git
 # never re-includes inside an excluded directory), so that line is not taken.
+
+# 两板内建扩展字库。/ Expanded embedded assets for both boards.
+!boards/metalio47/src/main/assets/builtin.ttf
+!boards/metalio47/src/main/assets/ui-hanzi.bin
