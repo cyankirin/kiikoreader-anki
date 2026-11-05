@@ -48,6 +48,9 @@ User reports uneven embedded body weight and ineffective AA in Pico local8838. P
 
 ## 正文缺字回退 / Missing reader glyphs
 
+用户2026-11-06决定：分区与字库均不调整，上游出新版本直接合并。接受 4 MiB 应用槽位仅余 80,480 B（1.9%）的现状，不裁剪内建字库、不把补字库外置、不移动 storage、不改分区表。依据：Anki 模块本身只有 43,709 B flash / 915 B bss（实测目标文件），不是压力来源，压力来自上游把内建字库扩到 7668 字。护栏：`app_check_size` 仍是硬失败点，上游增长导致镜像超 4 MiB 时 CI 构建直接失败，届时再决策。
+User decision 2026-11-06: change neither the partition table nor the font assets; merge upstream as-is. Accept the 4 MiB app slot being 98.1% full (80,480 B left): no glyph trimming, no moving the supplement to storage, no storage relocation, no partition edits. Rationale: the Anki module measures 43,709 B flash / 915 B bss from real objects, so it is not the pressure — upstream's 7668-glyph expansion is. Guardrail: app_check_size still hard-fails, so if upstream growth pushes the image past 4 MiB the CI build stops and the decision is revisited then.
+
 用户2026-11-03要求优先复用已有补字库补正文缺字。当前字体原生字形优先，缺字按内建轮廓、现有GB2312位图补字回退；不替换字体选择或扩大字库资产。排版和绘制共用前进宽度，界面与正文使用独立解压工作区，正文缓存可释放，临时失败不缓存缺字方块。两板保持各自现有缓存预算与Moku波形/引擎，先本地验证。
 User2026-11-03 prioritizes reusing the existing supplement for missing reader glyphs. Native glyphs take priority, then built-in outlines and the shipped GB2312 bitmap supplement; preserve font selection/assets. Layout and drawing share advances; UI/reader decode workspaces are independent and reclaimable, and transient failures do not cache .notdef. Preserve board-specific cache budgets and Moku display/reader engines; validate locally first.
 
