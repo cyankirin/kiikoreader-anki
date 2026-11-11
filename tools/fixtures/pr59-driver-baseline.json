@@ -379,37 +379,37 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/llms-full_en.md": {
-      "sha256": "6e33d8a3f1d435822831840fcf2a9b58eff94e8d42375e7f624e15d9cebf610d",
+      "sha256": "937dfa30b4cc8a86b4b790604d3e7b575d1221eb4ed8800d2d1f8b24444ce9b6",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/llms-full_zh_cn.md": {
-      "sha256": "25fbefd816b571b7f225e1f020680767cf7be26029c45d8096876ce11175b460",
+      "sha256": "ab630ce02f77aeb122b746a2d309af274135085c7bdababc6dd3e5cf5514f11e",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/pmu_protocol_en.h": {
-      "sha256": "82dc4214d8c27f8c0563b60dc1a60d42d30ae49036b760f2d8221b49b36670a8",
+      "sha256": "31be4a4cf19a53ca4bdca08204367bfeea93451329e30dcbac55b41ba8c2fc94",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/pmu_registers_en.json": {
-      "sha256": "93017c4b6f22f6d8fbf4aace904269819ec501c30691070100201d5238d9fc68",
+      "sha256": "6585f419a1b91e9ca8086f9a0eeffd486a5ae0d354880214df4cdce95827cdd2",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/pmu_registers_zh_cn.json": {
-      "sha256": "179fb6a010e81192eb1ee35918ac53f1dc3c63cf8fd0e3b7f23856d3491c7ae5",
+      "sha256": "45e78c086c1c60955bb50f444a5745f037d0a9d0b310bb60510de1c8c2781d62",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/read_pico_pmu_datasheet_v1.0.8_en.pdf": {
-      "sha256": "32d4ca544e166a78f1d2def50346961085aaf2f3b83eedf26810b7d901c1f5ff",
+      "sha256": "1ac03ec9924f38280cfc294ad57282d80b1db2118ea9158a6ae0e06adf497529",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/docs/read_pico_pmu_datasheet_v1.0.8_zh_cn.pdf": {
-      "sha256": "e0bbc9f2295d16a7934a893e6f14f11cdf1db4439997a44d7eb6ae39e5481c05",
+      "sha256": "0586fc829cb5be5931ca9a06dc0929a2167ec215ab5a9f95142ad841fec1f224",
       "user_decision": "2026-11-11",
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     }
