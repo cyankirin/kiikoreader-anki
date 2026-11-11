@@ -42,6 +42,8 @@ jobs:
           python3 tools/boot_panel_actions_host_test.py
           python3 tools/lock_pin_host_test.py
           python3 tools/lock_screen_host_test.py
+          python3 tools/lock_style_host_test.py
+          python3 tools/pico_lock_clean_frame_host_test.py
           python3 tools/font_picker_catalog_host_test.py
           python3 tools/font_catalog_host_test.py
           python3 tools/power_double_click_host_test.py
@@ -57,7 +59,6 @@ jobs:
           python3 tools/shelf_pager_host_test.py
           python3 tools/quick_layer_raster_host_test.py
           python3 tools/test_epd_difference_bounds.py --check-regression
-          python3 tools/display_commit_contract_host_test.py
           python3 tools/pico_reader_crop_host_test.py
           sh tools/run_app_loop_host_tests.sh
           python3 tools/reader_spacing_host_test.py
@@ -103,6 +104,16 @@ jobs:
           # Online update host tests need cJSON from managed_components/, which the
           # component manager materializes during the build; run them after it.
           CC=gcc bash tools/run_ota_host_tests.sh
+      - name: Verify transparent-cover pixels and cache reads
+        if: matrix.board == 'pico'
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends zlib1g-dev
+          python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/bookmark-tests/${{ matrix.board }}
+          KIIKO_TEST_BOARD="${{ matrix.board }}" \
+          KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \
+            python3 build/bookmark-tests/${{ matrix.board }}/tools/book_lock_bookmark_host_test.py
       - uses: actions/upload-artifact@v4
         with:
           name: firmware-${{ matrix.board }}

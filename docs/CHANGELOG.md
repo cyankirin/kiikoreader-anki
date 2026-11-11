@@ -1,5 +1,24 @@
 # 版本变更 / Changelog
 
+## 本地测试 / Local test — 2026-11-06
+
+- S31 屏幕修复加强：盲刷黑白从 3 个清屏循环提高到 12 个（4 轮 × 每轮 10 黑 + 13 白 + 3 收尾相），收尾再连做 3 次完整 48 相 GC16 全刷，耗时约 5-7 秒，用于清顽固残影。
+  S31 panel repair is stronger: blind black/white driving goes from three clear cycles to twelve (four rounds of 10 black + 13 white + 3 cleanup phases each), followed by three complete 48-phase GC16 cleans; it takes about 5-7 seconds and targets stubborn ghosting.
+
+- 阅读页底部进度显示本章页码：`当前页/本章页数 + 全书百分比`，与阅读统计“本章跳转”使用同一份页码；左侧章节名保持不变。
+  The reader footer now shows the page inside the current chapter (`page/chapter pages` plus the whole-book percentage), using the same page count as the stats chapter-jump sheet; the chapter name on the left is unchanged.
+
+- 修复跨文件脚注弹窗乱码：零宽字符清洗时后续字节误从当前章节正文读取，导致自带注释文本的多字节汉字解码错误；现在统一从注释文本源读取。
+  Fix garbled cross-file footnote cards: the zero-width cleanup read continuation bytes from the chapter body instead of the note's own text, corrupting multi-byte characters. It now reads from the note source throughout.
+
+## 本地测试 / Local test — 2026-11-05
+
+- 书架缓存迁到 TF 根目录 `.kiikoread`：`shelf.idx` 位置索引 + `covers/` 成品点阵 + `index/` 元数据索引。开机先按索引上屏，目录核对、封面任务在后台进行；封面按页加载（切到哪页加载哪页），逐本出现并显示「正在加载书架 x/9」进度，首次打开书籍时后台预热该书的封面缓存。默认封面不再写入真封面缓存，解码失败不会固化成假封面；旧目录缓存可回退复用。
+  Shelf caches now live under TF:/kiikoread: `shelf.idx` position index, `covers/` finished rasters and `index/` metadata. Boot paints from the index first and reconciles/loads covers in the background; covers load page by page, appear one by one with a `loading x/9` progress line, and a book's cover is warmed when it is first opened. Generated default covers are never persisted as real ones, and legacy cache folders remain readable.
+
+- 跨文件脚注：正文里的 `文件#片段` 链接现在会到目标 XHTML 的 id 元素取注释文本，弹窗显示；注释页里指回正文的 key/back/noteref 回跳链接自动跳过。文字注号（如“注１”）也按排版位置可点，热区按字号放大；图标注号保持原行为。
+  Cross-file footnotes: body links of the form `file#fragment` now pull the note text from the target XHTML's id element and show it in the pop-up; key/back/noteref back-links inside note pages are skipped. Text markers (e.g. "注１") are tappable from their typeset position with a padded hotspot; icon markers keep their old behaviour.
+
 ## Pico 0.3.3-rc105 / Metalio S31 0.3.3-rc110 — 2026-11-04
 
 - 两板内建覆盖7668字符，正文缺字回退、16级灰阶补字、缩放边缘及逐字墨量校正；保留系统字形与导入字体。支持默认全屏、紧凑阅读线按钮和稳定的上下操作栏/分页，修复书架分页箭头。
@@ -10,6 +29,12 @@
   Publish matching web/TF/OTA builds, retaining original rc104/rc109 install/download entries, historic bytes and partitions. Preserve settings/progress by default; S31 no longer checks current-firmware branding.
 
 ## 本地测试 / Local test — 2026-11-04
+
+- Pico四种锁屏样式入锁统一执行一次GC16白底清理，再显示完整锁屏图，避免旧阅读文字透出；正常路径不恢复原三轮预清屏。拼贴圆锁提示保持局部GC16，浅睡解锁仍从真实显示记录一次GC16恢复页面，随后恢复网络并重新开始按键保护和空闲计时。临时白画布分配或刷新失败保留原清屏兜底；图片透明度、密码校验、深睡启动和S31不变。
+  All four Pico lock styles present one white GC16 target before the complete lock image to prevent old-text ghosting, without three normal preclear cycles. Keep local collage feedback, one-pass light-sleep page restoration, deferred networking and renewed input guards. Retain clearing on allocation/scan failure, image alpha, PIN authentication, deep boot and S31 behavior.
+
+- Pico透明书封在内存充足时复用校验中解压的书封层，省去第二遍读卡和解压；完整校验后才修改当前底图，低内存沿用原路径，版本不变。
+  Pico transparent covers reuse decoded pixels from complete cache validation when memory permits, avoiding a second read/decode before composition. Retain the low-memory path and existing versions.
 
 - S31内建补字对齐Pico：同样7668字覆盖、16级灰阶、源字宽、缩放边缘与逐字墨量校正，保留全部界面字形、原生/外置字体和既有刷新方案。移除仅用于旧尺寸检查的未使用锁屏位图，沿用原分区及锁屏样式，仅本地测试。
   Align S31 supplements with Pico's7668-character coverage,16-level gray, source advances, scaled edges and per-glyph ink calibration. Retain UI glyphs,native/imported faces and refresh policies; remove unused lock art formerly linked for a size check, preserving partitions and lock styles. Local test only.

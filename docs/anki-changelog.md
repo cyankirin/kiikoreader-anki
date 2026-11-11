@@ -23,6 +23,18 @@
         fails when the log and the firmware version drift apart.
 -->
 
+## 0.3.3-rc106.01 — 2026-11-11
+
+### 新增
+- **设置改为「索引 + 二级分组」**：主页面只留头像卡片和四个分组入口（连接与时间 / 显示 / 个性化功能 / 升级和恢复），点进去后该组各行单屏显示。两级都放得下，不再需要长距离滑动，也取消了主列表的滚动位移。
+  Settings now use an index plus one page per group: the main screen keeps the profile card and four group entries (connection/time, display, personalisation, upgrade/recovery) and each group opens on a single screen. No long swipes, and the main list no longer scrolls at all.
+
+### 变更
+- 合并上游 `v0.3.3-rc106`：锁屏清屏改为「真实历史 + 一次 GC16 白目标」再输出锁图（`present_clean_lock`），这也是实机反馈修复成片残留的那处改动；另含页脚章内页码、跨文件 EPUB 脚注、书架封面缓存到 TF、锁屏解锁提速。
+  Merged upstream v0.3.3-rc106: the lock screen now runs one calibrated white GC16 pass over the true history before the final art (`present_clean_lock`) — the change device testers report fixes the ghost patches — plus chapter page numbers in the footer, cross-file EPUB footnotes, shelf cover caching on TF and faster lock/unlock.
+- 显示路径按上游实现走：`highlevel.c` 与 `pico_reader_crop_host_test.py` 采用上游版本，本 fork 之前的 epdiy 回退与配套契约探针已撤除。
+  The display path follows upstream: highlevel.c and the crop host test are taken as-is, and the fork's earlier epdiy revert and its contract probe are gone.
+
 ## 0.3.3-rc105.02 — 2026-11-11
 
 ### 修复

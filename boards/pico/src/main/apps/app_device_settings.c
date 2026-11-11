@@ -153,6 +153,9 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
 static int s_style_scroll, s_main_scroll;
+// 中文：二级分组页码。-1 = 索引页（只列分组），0..3 = 只显示该组的行，两级都是单屏、不需要滚动。
+// / Two-level grouping: -1 lists the groups, 0..3 shows one group. Both fit one screen, so no scrolling.
+static int s_main_group = -1;
 // 新样式使用新编号；旧3/4仍退回亚克力，列表保持5。
 // New style gets a new ID; retired3/4 still fall back to acrylic and list remains5.
 static const uint8_t s_shelf_style_ids[] = {1, 2, 6, 5};
@@ -439,6 +442,21 @@ static int settings_main_row_height(void) {
 // with 8 px to spare.
 #define SETTINGS_SCROLL_MAX \
     (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
+#define SETTINGS_GROUP_COUNT 4
+// 索引页与二级页共用同一个起始基线，行高沿用 SETTINGS_ROW_H。
+// The index and the group pages share one top baseline and the row height.
+// 索引页从原第一个分组的基线开始，避开上方头像卡片。
+// The index starts where the first group used to, clear of the profile card.
+#define SETTINGS_INDEX_Y SETTINGS_WIRELESS_Y
+#define SETTINGS_GROUP_TOP 236
+static int settings_group_y(int g) {
+    switch (g) {
+        case 0: return SETTINGS_WIRELESS_Y;
+        case 1: return SETTINGS_DISPLAY_Y;
+        case 2: return SETTINGS_PERSONAL_Y;
+        default: return SETTINGS_MAINTENANCE_Y;
+    }
+}
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -1539,7 +1557,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     const int profile_y=180-s_main_scroll, profile_h=settings_profile_height();
-    if (profile_y+profile_h>160) {
+    if (s_main_group < 0 && profile_y+profile_h>160) {
         settings_card(fb,(EpdRect){36,profile_y,612,profile_h},24,UI_GRAY_WHITE,0x70);
         int avatar_y=profile_y+(profile_h-82)/2;
         bool avatar_ok=s_avatar_ready;
@@ -1561,8 +1579,33 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
     const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
     const int connection_icons[]={0,1,6};
-    setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
-                  connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
+    if (s_main_group < 0) {
+        // 索引页：只列分组，各自带上当前取值；具体行在下一级。
+        // Index page: one entry per group with its current value; rows live one level down.
+        char index_wireless[64], index_display[64], index_personal[64];
+        snprintf(index_wireless,sizeof(index_wireless),"%s",wifi);
+        snprintf(index_display,sizeof(index_display),"%s",font_name);
+        snprintf(index_personal,sizeof(index_personal),"%s",
+                 app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":
+                 app_settings_lock_style()==1?"壁纸":"阅读票根");
+        const char *index_labels[]={"连接与时间","显示","个性化功能","升级和恢复"};
+        const char *index_values[]={index_wireless,index_display,index_personal,"OTA / TF 卡"};
+        const int index_icons[]={0,2,4,12};
+        setting_group(fb,SETTINGS_INDEX_Y-49,"设置",SETTINGS_INDEX_Y,
+                      index_icons,index_labels,index_values,SETTINGS_GROUP_COUNT);
+    } else if (s_main_group == 0) {
+        setting_group(fb,SETTINGS_GROUP_TOP-49,"连接与时间",SETTINGS_GROUP_TOP,
+                      connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
+    } else if (s_main_group == 1) {
+        setting_group(fb,SETTINGS_GROUP_TOP-49,"显示",SETTINGS_GROUP_TOP,
+                      display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
+    } else if (s_main_group == 2) {
+        setting_group(fb,SETTINGS_GROUP_TOP-49,"个性化功能",SETTINGS_GROUP_TOP,
+                      personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
+    } else {
+        setting_group(fb,SETTINGS_GROUP_TOP-49,"升级和恢复",SETTINGS_GROUP_TOP,
+                      maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
+    }
     char font_name[96],contrast[24],idle[24],signature[96];
     snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
@@ -1573,21 +1616,15 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电",app_setup_english()?"English":"简体中文"};
     const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9,2};
-    setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
-                  display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
     const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
     const int personal_icons[]={4,5,16,10};
-    setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
-                  personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
     const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机","重置系统"};
     const int maintenance_icons[]={12,8,17,13,11};
-    setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
-                  maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
@@ -1628,6 +1665,7 @@ static void on_enter(app_ctx_t *ctx) {
     s_ble_feedback[0] = 0;
     s_page = SETTINGS_MAIN;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
+    s_main_group = -1;
     s_collage_prepare_pending = false;
     s_scroll_drag_consumed = s_scroll_present_pending = false;
     s_wallpaper_selected = -1;
@@ -2025,7 +2063,9 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if(s_page==SETTINGS_FACTORY_RESET)return reset_gesture(ctx,ev);
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
     if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN || s_page == SETTINGS_SHELF_STYLE) {
-        int limit = SETTINGS_SCROLL_MAX;
+        // 两级分组都单屏放下，主设置页不再需要滚动。
+        // Both levels fit one screen, so the main settings page never scrolls.
+        int limit = 0;
         int *offset = &s_main_scroll;
         if (s_page == SETTINGS_SHELF_STYLE) {
             limit=263+SHELF_STYLE_CHOICES*253-23-settings_viewport_end()+12;
@@ -2185,7 +2225,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
             }
             s_font_page=0;
-            if (s_main_scroll>SETTINGS_SCROLL_MAX) s_main_scroll=SETTINGS_SCROLL_MAX;
+            if (s_main_scroll>0) s_main_scroll=0;
             ui_text_set_system_scale(true);s_notice[0]=0;return APP_REDRAW_PAGE;
         }
         for (int slot=0;slot<l.slots;++slot) {
@@ -2443,7 +2483,21 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (y<160 || y>=UI_NAV_TOP || ev->x0<36 || ev->x0>=648) return APP_REDRAW_NONE;
     y+=s_main_scroll;
-    if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
+    if (s_main_group < 0) {
+        // 索引页：点头像进资料，点分组进二级页。
+        // Index page: the profile card opens the editor, each group row opens its page.
+        if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
+        int pick=-1;
+        if (y>=SETTINGS_INDEX_Y && y<SETTINGS_INDEX_Y+SETTINGS_GROUP_COUNT*SETTINGS_ROW_H)
+            pick=(y-SETTINGS_INDEX_Y)/SETTINGS_ROW_H;
+        if (pick<0 || pick>=SETTINGS_GROUP_COUNT) return APP_REDRAW_NONE;
+        s_main_group=pick; s_main_scroll=0;
+        return APP_REDRAW_PAGE;
+    }
+    // 二级页：把屏幕坐标还原成该组在长列表里的原始 Y，后面的分派保持原样。
+    // Group page: map the tap back to the group's original Y so the dispatch below is unchanged.
+    y = y - SETTINGS_GROUP_TOP + settings_group_y(s_main_group);
+    if (y>=180 && y<180+settings_profile_height()) return APP_REDRAW_NONE;
     int row;
     if (y>=SETTINGS_WIRELESS_Y && y<SETTINGS_WIRELESS_Y+SETTINGS_WIRELESS_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_WIRELESS_Y)/SETTINGS_ROW_H;
@@ -2512,6 +2566,9 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
     if (s_page == SETTINGS_BLE_SCAN) {
         ble_pt_scan_stop();
         if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
+    }
+    if (key == 1 && s_page == SETTINGS_MAIN && s_main_group >= 0) {
+        s_main_group = -1; s_main_scroll = 0; return APP_REDRAW_PAGE;
     }
     if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {

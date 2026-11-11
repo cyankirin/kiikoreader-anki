@@ -35,7 +35,7 @@ main=s[s.index('    if (y<160 || y>=UI_NAV_TOP || ev->x0<36',start):s.index('\ns
 assert main.endswith('}')
 main=main[:-1]
 enum=s[s.index('typedef enum { SETTINGS_MAIN'):s.index('} settings_page_t;')+len('} settings_page_t;')]
-macros='\n'.join(re.findall(r'^#define SETTINGS_(?:ROW_H|WIRELESS_ROWS|DISPLAY_ROWS|PERSONAL_ROWS|MAINTENANCE_ROWS|WIRELESS_Y|DISPLAY_Y|PERSONAL_Y|MAINTENANCE_Y)[^\n]*',s,re.M))
+macros='\n'.join(re.findall(r'^#define SETTINGS_(?:ROW_H|GROUP_COUNT|INDEX_Y|GROUP_TOP|WIRELESS_ROWS|DISPLAY_ROWS|PERSONAL_ROWS|MAINTENANCE_ROWS|WIRELESS_Y|DISPLAY_Y|PERSONAL_Y|MAINTENANCE_Y)[^\n]*',s,re.M))
 layout=s[s.index('typedef struct {\n    EpdRect size, preview;'):s.index('static system_font_layout_t system_font_layout(')]
 unit=r'''
 #include <assert.h>
@@ -76,6 +76,7 @@ static void app_font_activate_system(void){++system_activations;}
 static void app_font_allow_user_choice(void){}
 static void ui_text_set_system_scale(bool b){assert(b);}
 static int s_font_page,s_main_scroll,s_style_scroll,s_ble_scroll,s_ble_learning;
+static int s_main_group;
 static bool s_font_sync_confirm,s_config_confirm,s_boot_pending,s_reset_confirm,s_reset_pending,s_panel_repair_pending;
 static char s_reset_notice[96];
 static char s_font_sync_path[192],s_notice[96],s_ble_notice[96],s_ble_feedback[96];
@@ -96,7 +97,7 @@ static void profile_editor_open(bool signature){assert(signature);++profile_edit
 '''+enum+'\nstatic settings_page_t s_page;\n'+macros+'''
 #define SETTINGS_SCROLL_MAX (SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H-UI_NAV_REFRESH_END+12)
 static void upgrade_open(void){s_page=SETTINGS_UPGRADE;}
-'''+fn('settings_viewport_end')+'\n'+fn('settings_stacked')+'\n'+fn('settings_profile_height')+'\n'+fn('settings_main_row_height')+'\n'+layout+fn('system_font_layout')+'\n'+fn('system_font_item_rect')+'\n'+fn('system_font_sync_button')+'\n'
+'''+fn('settings_viewport_end')+'\n'+fn('settings_stacked')+'\n'+fn('settings_profile_height')+'\n'+fn('settings_main_row_height')+'\n'+fn('settings_group_y')+'\n'+layout+fn('system_font_layout')+'\n'+fn('system_font_item_rect')+'\n'+fn('system_font_sync_button')+'\n'
 unit+='static app_redraw_t font_tap(int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+modal+choose+'return APP_REDRAW_NONE;}\n'
 unit+='static app_redraw_t modal_swipe(void){ui_gesture_event_t e={UI_GESTURE_SWIPE_U,400,700};const ui_gesture_event_t*ev=&e;'+modal+'return APP_REDRAW_NONE;}\n'
 unit+='static app_redraw_t main_tap(app_ctx_t*ctx,int x,int y){ui_gesture_event_t e={UI_GESTURE_TAP,x,y};const ui_gesture_event_t*ev=&e;'+main+'}\n'
@@ -113,24 +114,31 @@ int main(void){
    assert(SETTINGS_DISPLAY_Y>SETTINGS_WIRELESS_Y+3*SETTINGS_ROW_H);
    assert(SETTINGS_PERSONAL_Y>SETTINGS_DISPLAY_Y+6*SETTINGS_ROW_H);
    const int tops[]={SETTINGS_WIRELESS_Y,SETTINGS_DISPLAY_Y,SETTINGS_PERSONAL_Y,SETTINGS_MAINTENANCE_Y};
+   // 长列表坐标仍按组递增（二级页用它做 y 映射的基准）
+   assert(tops[0]<tops[1]&&tops[1]<tops[2]&&tops[2]<tops[3]);
    const int counts[]={3,7,4,5};
    const int destinations[][7]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,-2,SETTINGS_POWER_SLEEP},
      {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3},
      {SETTINGS_UPGRADE,SETTINGS_CONFIG,-4,SETTINGS_BOOT,SETTINGS_FACTORY_RESET}};
-   for(int group=0;group<4;++group)for(int i=0;i<counts[group];++i){
-     s_page=SETTINGS_MAIN;int center=tops[group]+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=center-500;ctx.request_app=NULL;
-     main_tap(&ctx,300,500);
+   for(int group=0;group<4;++group){
+     // 索引页点第 group 行进入该组
+     s_page=SETTINGS_MAIN;s_main_group=-1;s_main_scroll=0;ctx.request_app=NULL;
+     assert(main_tap(&ctx,300,SETTINGS_INDEX_Y+group*SETTINGS_ROW_H+SETTINGS_ROW_H/2)==APP_REDRAW_PAGE);
+     assert(s_main_group==group);
+     for(int i=0;i<counts[group];++i){
+     s_page=SETTINGS_MAIN;int center=SETTINGS_GROUP_TOP+i*SETTINGS_ROW_H+SETTINGS_ROW_H/2;s_main_scroll=0;ctx.request_app=NULL;
+     main_tap(&ctx,300,center);
      if(destinations[group][i]>=0)assert((int)s_page==destinations[group][i]);
      else if(destinations[group][i]==-1)assert(ctx.request_app==&app_transfer);
      else if(destinations[group][i]==-2)assert(s_page==SETTINGS_MAIN);
      else if(destinations[group][i]==-3)assert(profile_edits>0);
      else assert(s_panel_repair_pending&&s_page==SETTINGS_MAIN);
      s_page=SETTINGS_MAIN;assert(main_tap(&ctx,10,500)==APP_REDRAW_NONE&&s_page==SETTINGS_MAIN);
+     }
    }
-   s_main_scroll=SETTINGS_SCROLL_MAX;s_page=SETTINGS_MAIN;
-   int last=SETTINGS_MAINTENANCE_Y+SETTINGS_MAINTENANCE_ROWS*SETTINGS_ROW_H-1-s_main_scroll;
-   assert(last<UI_NAV_TOP&&main_tap(&ctx,300,last)==APP_REDRAW_PAGE&&s_page==SETTINGS_FACTORY_RESET);
+   // 两级都单屏：不产生滚动位移，索引页点空白不跳转。
+   s_page=SETTINGS_MAIN;s_main_group=-1;assert(main_tap(&ctx,300,UI_NAV_TOP-40)==APP_REDRAW_NONE&&s_main_group==-1);
  }
  scale=100;s_page=SETTINGS_SYSTEM_FONT;s_font_page=0;s_main_scroll=0;s_font_sync_confirm=false;
  for(int i=0;i<11;++i){EpdRect r=system_font_layout().size;assert(font_tap(300,r.y+r.height/2)==APP_REDRAW_PAGE);assert(scale==((i+1)%11)*10+100);}
