@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
-"""Exercise real Pico interlacing and highlevel masks/commits against exact pixel bounds."""
+"""Exercise real Pico interlacing and highlevel drive/commit bounds.
+
+中文：rc105 曾要求驱动范围等于请求矩形，代价是跳列驱动在面板上累积电荷、阅读久了出现成片黑
+（rc102 无此问题）。契约已恢复为 rc102 的"驱动=扫描=回写同一 32 列对齐段"，本测试随之按
+对齐段判定：段外不得驱动，回写只落在段内。
+"""
 from pathlib import Path
 import subprocess
 import tempfile
@@ -27,6 +32,7 @@ static _Alignas(16) uint8_t front[B],back[B],diff[W*H],cols[W/2],old[B];
 static bool rows[H],full,fail,same;
 static int rotation,scans,checks;
 static EpdRect expected;
+static int seg_x0,seg_x1;
 static int epd_height(void){return H;}
 static enum EpdRotation epd_get_rotation(void){return rotation;}
 static EpdRect epd_full_screen(void){return(EpdRect){0,0,W,H};}
@@ -35,14 +41,20 @@ static void hl_record_timing(int a,int b,int c){(void)a;(void)b;(void)c;}
 static void epd_leading_skip_discard(void){}
 static EpdRect epd_difference_image_cropped(const uint8_t*t,const uint8_t*f,EpdRect a,uint8_t*d,bool*r,uint8_t*c){return epd_difference_image_base(t,f,a,W,H,d,r,c);}
 static unsigned pixel(const uint8_t*p,int x,int y){return(p[y*W/2+x/2]>>(4*(x&1)))&15;}
-static bool inside(int x,int y){return x>=expected.x&&x<expected.x+expected.width&&y>=expected.y&&y<expected.y+expected.height;}
+// 纵向仍由请求矩形（脏行）决定，横向放宽到 32 列对齐段：驱动与回写必须同段，
+// 否则被跳过的列会在面板上累积成片黑（rc105 的问题，rc102 无）。
+static bool inside(int x,int y){return x>=seg_x0&&x<seg_x1&&y>=expected.y&&y<expected.y+expected.height;}
 static enum EpdDrawError epd_draw_base(EpdRect a,const uint8_t*d,EpdRect crop,enum EpdDrawMode m,int t,const bool*r,const uint8_t*c,const EpdWaveform*w){
  (void)a;(void)crop;(void)m;(void)t;(void)w;
  assert(!memcmp(back,old,B));++scans;
  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
   bool driven=r[y]&&((c[x/2]>>(4*(x&1)))&15);
   // Gray-to-gray GL16 can drive even unchanged pixels: check the mask, not only framebuffer values.
-  assert(!driven||inside(x,y));
+  if(driven&&!inside(x,y)){
+   printf("driven outside segment: x=%d y=%d seg=[%d,%d) rect=(%d,%d,%d,%d) rot=%d full=%d\n",
+          x,y,seg_x0,seg_x1,expected.x,expected.y,expected.width,expected.height,rotation,(int)full);
+   assert(0);
+  }
   if(full&&inside(x,y))assert(driven);
   if(driven)assert(d[y*W+x]==((pixel(front,x,y)<<4)|pixel(old,x,y)));
  }
@@ -59,6 +71,10 @@ static void check(EpdRect logical){
  case 2:expected=(EpdRect){W-logical.x-logical.width,H-logical.y-logical.height,logical.width,logical.height};break;
  default:expected=(EpdRect){logical.y,H-logical.x-logical.width,logical.height,logical.width};break;
  }
+ seg_x0=expected.x&~31;
+ seg_x1=(expected.x+expected.width+31)&~31;
+ if(seg_x0<0)seg_x0=0;
+ if(seg_x1>W)seg_x1=W;
  memset(back,0x99,B);memset(front,0x99,B);
  // Pending changes inside and outside the crop must not be committed together.
  if(!same)for(int y=0;y<H;++y)for(int x=0;x<W;x+=7)front[y*W/2+x/2]^=(uint8_t)(15u<<(4*(x&1)));
@@ -68,7 +84,14 @@ static void check(EpdRect logical){
  assert(hl_update_area(&h,MODE_GL16,25,logical,full)==(fail?EPD_DRAW_EMPTY_LINE_QUEUE:EPD_DRAW_SUCCESS));
  assert(scans==1);
  for(int y=0;y<H;++y)for(int x=0;x<W;++x){
-  assert(pixel(back,x,y)==(!fail&&inside(x,y)?pixel(front,x,y):pixel(old,x,y)));
+  {
+   unsigned want=pixel(!fail&&inside(x,y)?front:old,x,y);
+   if(pixel(back,x,y)!=want){
+    printf("commit mismatch x=%d y=%d got=%u want=%u seg=[%d,%d) rect=(%d,%d,%d,%d) rot=%d full=%d fail=%d same=%d\n",
+           x,y,pixel(back,x,y),want,seg_x0,seg_x1,expected.x,expected.y,expected.width,expected.height,rotation,(int)full,(int)fail,(int)same);
+    assert(0);
+   }
+  }
  }
  ++checks;
 }
@@ -91,7 +114,7 @@ int main(void){
  assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,W,H},false)==EPD_DRAW_SUCCESS);
  assert(hl_update_area(&h,MODE_GL16,25,(EpdRect){0,0,0,3},true)==EPD_DRAW_SUCCESS);
  assert(!scans&&!memcmp(front,back,B));
- puts("PASS: real Pico diff/highlevel exact scan masks and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");
+ puts("PASS: real Pico diff/highlevel aligned-segment drives and success-only commits; immersive/footer/standard crops,4 rotations,odd nibbles,narrow/aligned areas and failures");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='pico-reader-crop-') as temp:
