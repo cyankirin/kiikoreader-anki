@@ -1579,6 +1579,25 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
     const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
     const int connection_icons[]={0,1,6};
+    char font_name[96],contrast[24],idle[24],signature[96];
+    snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
+    snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
+    unsigned minutes=app_settings_auto_lock_minutes();
+    if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else snprintf(idle,sizeof(idle),"%s","关闭");
+    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","双击解锁","关机睡眠","语言"};
+    const char *display_values[]={font_name,contrast,
+        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
+        app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电",app_setup_english()?"English":"简体中文"};
+    const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9,2};
+    snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
+    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
+    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
+        app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
+        lock_pin_enabled()?"已开启":"已关闭",signature};
+    const int personal_icons[]={4,5,16,10};
+    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
+    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机","重置系统"};
+    const int maintenance_icons[]={12,8,17,13,11};
     if (s_main_group < 0) {
         // 索引页：只列分组，各自带上当前取值；具体行在下一级。
         // Index page: one entry per group with its current value; rows live one level down.
@@ -1606,25 +1625,6 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         setting_group(fb,SETTINGS_GROUP_TOP-49,"升级和恢复",SETTINGS_GROUP_TOP,
                       maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     }
-    char font_name[96],contrast[24],idle[24],signature[96];
-    snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
-    snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
-    unsigned minutes=app_settings_auto_lock_minutes();
-    if(minutes)snprintf(idle,sizeof(idle),"%u 分钟",minutes);else snprintf(idle,sizeof(idle),"%s","关闭");
-    const char *display_labels[]={"系统字体","系统对比度","主页刷新模式","首页强刷","自动休眠锁屏","双击解锁","关机睡眠","语言"};
-    const char *display_values[]={font_name,contrast,
-        app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
-        app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电",app_setup_english()?"English":"简体中文"};
-    const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9,2};
-    snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
-    const char *personal_labels[]={"书架样式","锁屏样式","锁屏密码","状态栏签名"};
-    const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架",
-        app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
-        lock_pin_enabled()?"已开启":"已关闭",signature};
-    const int personal_icons[]={4,5,16,10};
-    const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
-    const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机","重置系统"};
-    const int maintenance_icons[]={12,8,17,13,11};
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
