@@ -127,7 +127,13 @@ int main(int argc,char **argv){
  assert(navigation_numbering("第廿一册：远方")==((21u<<NAV_ORDINAL_SHIFT)|NAV_VOLUME));
  assert(navigation_numbering("Chapter XII Start")==((12u<<NAV_ORDINAL_SHIFT)|NAV_CHAPTER|NAV_ENGLISH));
  while(fscanf(f,"%255s %271s %271s",path,expected,groups)==3){
-  verify(path,expected);check_groups(path,groups);unsigned hits=cache_hits;check_groups(path,groups);assert(cache_hits>hits);
+  verify(path,expected);check_groups(path,groups);
+  // 章节数摘要缓存由书架侧读取；按同一次序触发一次，确认命中且与开书结果一致。
+  // The chapter-count summary is read by the shelf; trigger it in that order and require a hit.
+  {struct stat st;assert(!stat(path,&st));unsigned hits=cache_hits;
+   assert(book_cached_chapter_count(path,(uint32_t)st.st_size,(int64_t)st.st_mtime)>0);
+   assert(cache_hits>hits);}
+  check_groups(path,groups);
   if(!fixtures)strcpy(first,path);
   if(strstr(path,"explicit")){damage_group_cache(path);check_groups(path,groups);}
   ++fixtures;

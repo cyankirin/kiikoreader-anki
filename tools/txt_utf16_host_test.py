@@ -78,10 +78,14 @@ int main(int argc,char **argv){
  while(fscanf(manifest,"%255s %d %d",path,&encoding,&bom)==3){
   snprintf(expected,sizeof(expected),"%s.utf8",path);snprintf(cache,sizeof(cache),"%s.idx",path);
   verify(path,expected,encoding,bom);unsigned hits=cache_hits;
-  // 空文件目录不命中缓存，沿用原行为；其他正常/损坏字符均能从已确认编码重载。
-  // Empty indexes keep their existing miss behavior; all other fixtures reload the confirmed encoding.
+  // 上游把章节数摘要缓存接到书架侧（book_cached_chapter_count）；按同一次序先问缓存再开书。
+  // 空文件目录仍不命中缓存，沿用原行为。
+  // Upstream moved the chapter-count summary behind the shelf (book_cached_chapter_count); ask it
+  // first, in the same order the shelf does. Empty indexes keep their existing miss behaviour.
+  {struct stat st;assert(!stat(path,&st));
+   if(st.st_size){assert(book_cached_chapter_count(path,(uint32_t)st.st_size,(int64_t)st.st_mtime)>0);
+                  assert(cache_hits>hits);}}
   verify(path,expected,encoding,bom);
-  struct stat st;assert(!stat(path,&st));if(st.st_size)assert(cache_hits>hits);
   FILE *f=fopen(cache,"r+b");assert(f);book_index_cache_header_t header;assert(fread(&header,1,sizeof(header),f)==sizeof(header));
   header.version=1;assert(!fseek(f,0,SEEK_SET)&&fwrite(&header,1,sizeof(header),f)==sizeof(header)&&!fclose(f));
   verify(path,expected,encoding,bom);
