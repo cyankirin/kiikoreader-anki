@@ -107,7 +107,14 @@ static void check_groups(const char *path,const char *expected){
  book_close();assert(!live);
 }
 static void damage_group_cache(const char *path){
- char cache[512];snprintf(cache,sizeof(cache),"%s.idx",path);FILE *f=fopen(cache,"r+b");assert(f);
+ char cache[512];snprintf(cache,sizeof(cache),"%s.idx",path);
+ // 上游把这个文件换成章节数摘要（两个计数），不再带卷表载荷；这种情况下没有可损坏的字段。
+ // Upstream made this file a chapter-count summary (two counters) instead of the volume payload,
+ // so there is nothing of that shape left to damage.
+ struct stat cs;
+ if(stat(cache,&cs)||(size_t)cs.st_size<sizeof(book_index_cache_header_t)+sizeof(txt_cache_payload_t)){
+  printf("group cache %s is a %lld-byte summary: nothing to damage\n",cache,(long long)cs.st_size);return;}
+ FILE *f=fopen(cache,"r+b");assert(f);
  book_index_cache_header_t key;txt_cache_payload_t p;
  assert(fread(&key,1,sizeof(key),f)==sizeof(key)&&fread(&p,1,sizeof(p),f)==sizeof(p));
  size_t n=p.count*sizeof(book_entry_t)+p.nav_count*sizeof(txt_nav_t)+(p.reserved[1]+((unsigned)p.reserved[2]<<8))*sizeof(book_txt_volume_t);
