@@ -77,6 +77,61 @@ OTA_MINIMUM_BASE = "0.3.3-rc72"
 # English: notes go into the device's char[384]; anything longer is rejected by the parser.
 OTA_NOTES_MAX = 383
 OTA_NOTES = "Anki 版：导入 .apkg 复习，保留设置与阅读记录。"
+
+# 中文：设备升级页只显示六行、约 120 个汉字，所以清单里的 notes 取本仓变更日志首条的前几条，
+#       每条截到第一个句号，超出屏幕容量时以省略号收尾。之前这里是一句固定文案，用户看不到
+#       这版到底改了什么。
+# English: The device upgrade page shows six lines (about 120 CJK characters), so the manifest
+#          notes come from this fork's changelog head: the first bullets, each cut at its first
+#          sentence, truncating with an ellipsis when the screen runs out. This used to be one
+#          fixed sentence, which told the user nothing about the release.
+OTA_NOTES_BULLETS = 4
+OTA_NOTES_CHARS = 118
+
+def changelog_path() -> Path:
+    """Repository changelog, independent of where the site is staged to."""
+    return Path(__file__).resolve().parents[1] / "docs/anki-changelog.md"
+
+
+def ota_notes_for(version: str) -> str:
+    """First bullets of this fork's changelog entry for `version`, fitted to the device page."""
+    path = changelog_path()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return OTA_NOTES
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith("## ") and line[3:].strip().split(" ")[0] == version:
+            start = index + 1
+            break
+    if start is None:
+        return OTA_NOTES
+    bullets: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        if not line.startswith("- "):
+            continue
+        text = line[2:].replace("**", "").replace("`", "").strip()
+        cut = text.find("。")
+        if cut != -1:
+            text = text[:cut]
+        if text:
+            bullets.append(text)
+        if len(bullets) >= OTA_NOTES_BULLETS:
+            break
+    if not bullets:
+        return OTA_NOTES
+    notes = "；".join(bullets)
+    if len(notes) > OTA_NOTES_CHARS:
+        notes = notes[:OTA_NOTES_CHARS].rstrip("；，、 ") + "…"
+    else:
+        notes += "。"
+    encoded = notes.encode("utf-8")
+    if len(encoded) > OTA_NOTES_MAX:
+        notes = encoded[:OTA_NOTES_MAX].decode("utf-8", "ignore")
+    return notes
 # 中文：网页刷机可回退的版本清单（最多四个），每版都从 firmware/ 里入库的镜像现场生成。
 # English: Rollback choices for the web flasher (at most four); each bundle is generated
 #          from a committed firmware/ image at deploy time.
@@ -144,7 +199,7 @@ def ota_image_name(version: str) -> str:
     return f"{OTA_IMAGE_PREFIX}{version}.bin"
 
 
-def build_ota_manifest(version: str, parts: dict[str, bytes], notes: str = OTA_NOTES) -> dict:
+def build_ota_manifest(version: str, parts: dict[str, bytes], notes: str | None = None) -> dict:
     """Compose `anki-update.json` from the real application bytes.
 
     中文：清单里的每个字段都要与设备端编译常量、实际镜像字节对得上，否则这里直接失败：
@@ -175,6 +230,8 @@ def build_ota_manifest(version: str, parts: dict[str, bytes], notes: str = OTA_N
         raise SystemExit(
             f"PICO_OTA_ANKI_FEED_URL is {identity['feed']!r}, but this tool publishes "
             f"{OTA_PREFIX + OTA_MANIFEST!r}; keep the firmware constant and the site path in step")
+    if notes is None:
+        notes = ota_notes_for(version)
     if len(notes.encode("utf-8")) > OTA_NOTES_MAX:
         raise SystemExit(f"OTA notes are {len(notes.encode('utf-8'))} bytes, over {OTA_NOTES_MAX}")
     return {

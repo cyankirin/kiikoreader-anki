@@ -85,6 +85,11 @@ static bool home_full;
 static uint8_t wake_presses=1;
 static uint8_t app_settings_wake_presses(void){return wake_presses;}
 static void app_settings_set_wake_presses(uint8_t n){wake_presses=n;}
+// 上游 rc106 源新增的「书架百分比显示」行：给出可保存的开关，点击分派才能被切出来编译。
+// The shelf-percentage row upstream added needs a persistable toggle so the sliced dispatch compiles.
+static bool shelf_badges;
+static bool app_settings_shelf_progress_badges(void){return shelf_badges;}
+static bool app_settings_set_shelf_progress_badges(bool on){shelf_badges=on;return true;}
 static void ttf_font_scan(void){++font_scans;}
 static void app_transfer_request_wifi_setup(void){++wifi_requests;}
 static bool ble_pt_pop_raw(ble_pt_raw_t*p){(void)p;return false;}
@@ -119,7 +124,8 @@ int main(void){
    const int counts[]={3,7,4,5};
    const int destinations[][7]={{-1,SETTINGS_BLUETOOTH,SETTINGS_TIME},
      {SETTINGS_SYSTEM_FONT,SETTINGS_SYSTEM_CONTRAST,SETTINGS_MAIN_REFRESH,-2,SETTINGS_AUTO_LOCK,-2,SETTINGS_POWER_SLEEP},
-     {SETTINGS_SHELF_STYLE,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3},
+     // 个性化：书架样式 / 书架百分比显示（就地开关）/ 锁屏样式 / 锁屏密码 / 状态栏签名
+     {SETTINGS_SHELF_STYLE,-2,SETTINGS_LOCK_STYLE,SETTINGS_LOCK_PIN,-3},
      {SETTINGS_UPGRADE,SETTINGS_CONFIG,-4,SETTINGS_BOOT,SETTINGS_FACTORY_RESET}};
    for(int group=0;group<4;++group){
      // 索引页点第 group 行进入该组

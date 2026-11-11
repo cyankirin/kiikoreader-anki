@@ -258,8 +258,18 @@ static bool check_feed(void) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     memcpy(&s_status->release, release, sizeof(*release));
     xSemaphoreGive(s_mutex);
-    state(pico_version_compare(release->version, running->version) > 0 ? PICO_UPDATE_AVAILABLE : PICO_UPDATE_LATEST,
-          pico_version_compare(release->version, running->version) > 0 ? "发现新版本，可下载安装" : "当前已是最新版本");
+    // 中文：分支版把官方基线加了一个本地小修订（如官方 rc106 → 本机 rc106.02），版本比较天然是「不更新」。
+    //       这时说清楚「官方版已并入本机」，否则用户会以为官方通道坏了。
+    // English: The fork carries a local sub-revision on top of the official base (official rc106 →
+    //   local rc106.02), so the comparison is naturally "not newer". Say that the official build is
+    //   already folded in, instead of a bare "up to date" that reads like a broken channel.
+    const int comparison = pico_version_compare(release->version, running->version);
+    const size_t base_len = strlen(release->version);
+    const bool same_base = strlen(running->version) > base_len &&
+        running->version[base_len] == '.' && !strncmp(running->version, release->version, base_len);
+    if (comparison > 0) state(PICO_UPDATE_AVAILABLE, "发现新版本，可下载安装");
+    else if (same_base) state(PICO_UPDATE_LATEST, "官方版本已并入当前系统，无需升级");
+    else state(PICO_UPDATE_LATEST, "当前已是最新版本");
     heap_caps_free(json); heap_caps_free(release);
     return true;
 failed:
