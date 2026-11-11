@@ -1,0 +1,352 @@
+{
+  "navigation": {
+    "tour": "navigation",
+    "title": "认识四个主页面",
+    "scope": "步骤"
+  },
+  "quick-menu": {
+    "tour": "quick-menu",
+    "title": "下拉快捷菜单",
+    "scope": "步骤"
+  },
+  "status-bar": {
+    "tour": "quick-menu",
+    "title": "下拉快捷菜单",
+    "scope": "步骤"
+  },
+  "manual-refresh": {
+    "tour": "quick-menu",
+    "title": "下拉快捷菜单",
+    "scope": "步骤"
+  },
+  "reader-tools": {
+    "tour": "reader-tools",
+    "title": "打开阅读工具栏",
+    "scope": "步骤"
+  },
+  "three-keys": {
+    "tour": "reader-tools",
+    "title": "打开阅读工具栏",
+    "scope": "步骤"
+  },
+  "keep-tools": {
+    "tour": "reader-tools",
+    "title": "打开阅读工具栏",
+    "scope": "步骤"
+  },
+  "reading-size": {
+    "tour": "reading-size",
+    "title": "调整正文字号",
+    "scope": "步骤"
+  },
+  "reading-font": {
+    "tour": "reading-font",
+    "title": "选择阅读字体",
+    "scope": "步骤"
+  },
+  "layout-margins": {
+    "tour": "layout-margins",
+    "title": "调整阅读排版",
+    "scope": "步骤"
+  },
+  "paragraph-spacing": {
+    "tour": "layout-margins",
+    "title": "调整阅读排版",
+    "scope": "步骤"
+  },
+  "indent-fine": {
+    "tour": "layout-margins",
+    "title": "调整阅读排版",
+    "scope": "步骤"
+  },
+  "bookmarks": {
+    "tour": "bookmarks",
+    "title": "添加阅读书签",
+    "scope": "步骤"
+  },
+  "toc-jump": {
+    "tour": "toc-jump",
+    "title": "打开章节目录",
+    "scope": "步骤"
+  },
+  "swipe-pages": {
+    "tour": "swipe-pages",
+    "title": "用手势翻页",
+    "scope": "步骤"
+  },
+  "tap-horizontal": {
+    "tour": "swipe-pages",
+    "title": "用手势翻页",
+    "scope": "步骤"
+  },
+  "tap-vertical": {
+    "tour": "swipe-pages",
+    "title": "用手势翻页",
+    "scope": "步骤"
+  },
+  "shelf-style": {
+    "tour": "shelf-style",
+    "title": "切换书架样式",
+    "scope": "步骤"
+  },
+  "recent-sort": {
+    "tour": "shelf-manage",
+    "title": "书架管理与排序",
+    "scope": "步骤"
+  },
+  "batch-select": {
+    "tour": "shelf-manage",
+    "title": "书架管理与排序",
+    "scope": "步骤"
+  },
+  "shelf-search": {
+    "tour": "shelf-manage",
+    "title": "书架管理与排序",
+    "scope": "步骤"
+  },
+  "delete-books": {
+    "tour": "shelf-manage",
+    "title": "书架管理与排序",
+    "scope": "步骤"
+  },
+  "unshelf": {
+    "tour": "shelf-manage",
+    "title": "书架管理与排序",
+    "scope": "步骤"
+  },
+  "main-refresh": {
+    "tour": "main-refresh",
+    "title": "主页刷新模式",
+    "scope": "步骤"
+  },
+  "system-font": {
+    "tour": "system-font",
+    "title": "设置系统字体",
+    "scope": "步骤"
+  },
+  "system-size": {
+    "tour": "system-font",
+    "title": "设置系统字体",
+    "scope": "步骤"
+  },
+  "auto-lock": {
+    "tour": "auto-lock",
+    "title": "自动休眠锁屏",
+    "scope": "步骤"
+  },
+  "sleep-resume": {
+    "tour": "auto-lock",
+    "title": "自动休眠锁屏",
+    "scope": "步骤"
+  },
+  "lock-style": {
+    "tour": "lock-style",
+    "title": "选择锁屏样式",
+    "scope": "步骤"
+  },
+  "wallpaper-lock": {
+    "tour": "lock-style",
+    "title": "选择锁屏样式",
+    "scope": "步骤"
+  },
+  "ticket-lock": {
+    "tour": "lock-style",
+    "title": "选择锁屏样式",
+    "scope": "步骤"
+  },
+  "collage-lock": {
+    "tour": "lock-style",
+    "title": "选择锁屏样式",
+    "scope": "步骤"
+  },
+  "pin-enable": {
+    "tour": "pin-enable",
+    "title": "设置四位锁屏密码",
+    "scope": "步骤"
+  },
+  "pin-change": {
+    "tour": "pin-enable",
+    "title": "设置四位锁屏密码",
+    "scope": "步骤"
+  },
+  "pin-unlock": {
+    "tour": "pin-enable",
+    "title": "设置四位锁屏密码",
+    "scope": "步骤"
+  },
+  "profile-name": {
+    "tour": "profile",
+    "title": "查看资料卡设置",
+    "scope": "步骤"
+  },
+  "profile-avatar": {
+    "tour": "profile",
+    "title": "查看资料卡设置",
+    "scope": "步骤"
+  },
+  "device-signature": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "web-signature": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-case": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-english": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-nine": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-full-pinyin": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-phrases": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-candidates": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-digits": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-symbols": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-caret": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-delete": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "ime-retype-clear": {
+    "tour": "signature",
+    "title": "修改状态栏签名",
+    "scope": "步骤"
+  },
+  "time-sync": {
+    "tour": "time-sync",
+    "title": "日期与时间入口",
+    "scope": "步骤"
+  },
+  "ble-pair": {
+    "tour": "bluetooth",
+    "title": "蓝牙翻页器入口",
+    "scope": "入口"
+  },
+  "ble-learn": {
+    "tour": "bluetooth",
+    "title": "蓝牙翻页器入口",
+    "scope": "入口"
+  },
+  "ble-shelf": {
+    "tour": "bluetooth",
+    "title": "蓝牙翻页器入口",
+    "scope": "入口"
+  },
+  "config-save": {
+    "tour": "backup",
+    "title": "保存与恢复入口",
+    "scope": "入口"
+  },
+  "config-restore": {
+    "tour": "backup",
+    "title": "保存与恢复入口",
+    "scope": "入口"
+  },
+  "backup": {
+    "tour": "backup",
+    "title": "保存与恢复入口",
+    "scope": "入口"
+  },
+  "restore-config": {
+    "tour": "backup",
+    "title": "保存与恢复入口",
+    "scope": "入口"
+  },
+  "restore-progress": {
+    "tour": "backup",
+    "title": "保存与恢复入口",
+    "scope": "入口"
+  },
+  "wifi-transfer": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "hotspot-transfer": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "usb-transfer": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "web-fonts": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "web-any-file": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "rescan": {
+    "tour": "files",
+    "title": "导入与管理文件",
+    "scope": "入口"
+  },
+  "home-component": {
+    "tour": "home-component",
+    "title": "切换首页组件",
+    "scope": "步骤"
+  },
+  "home-clock": {
+    "tour": "home-component",
+    "title": "切换首页组件",
+    "scope": "步骤"
+  },
+  "reading-goal": {
+    "tour": "reading-goal",
+    "title": "阅读记录与每日目标",
+    "scope": "步骤"
+  },
+  "home-goal": {
+    "tour": "reading-goal",
+    "title": "阅读记录与每日目标",
+    "scope": "步骤"
+  },
+  "reading-records": {
+    "tour": "reading-goal",
+    "title": "阅读记录与每日目标",
+    "scope": "步骤"
+  }
+}

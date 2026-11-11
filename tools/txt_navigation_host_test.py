@@ -43,6 +43,18 @@ static void tracked_free(void *p){
 #include "book_txt.c"
 #include "book_source.c"
 void html_text_free(html_text_t *text){(void)text;assert(!"TXT test entered EPUB cleanup");}
+// 上游把索引缓存拆成独立单元，并在 book_source 里改用已 stat 的入口；本探针只验证 TXT 章节
+// 导航，这里把新入口接回上面的缓存桩，EPUB 章节数查询给空实现（TXT 路径不会用到）。
+// Upstream split the index cache into its own unit and moved book_source onto the stat-ed entry.
+// This probe only covers TXT chapter navigation: route the new entry to the stub above and give the
+// EPUB chapter-count query an empty body (the TXT path never reaches it).
+bool book_index_cache_prepare_file(const char*tag_source,const char*tag,uint32_t version,uint64_t size,
+                                   int64_t modified,char*path,size_t cap,book_index_cache_header_t*key){
+ (void)size;(void)modified;return book_index_cache_prepare(tag_source,tag,version,path,cap,key);
+}
+uint16_t book_epub_cached_chapter_count(const char*path,uint32_t size,int64_t modified){
+ (void)path;(void)size;(void)modified;return 0;
+}
 bool book_index_cache_prepare(const char *source,const char *tag,uint32_t version,char *path,size_t cap,book_index_cache_header_t *key){
  if(disable_cache)return false;
  assert(!strcmp(tag,"txt")&&version==5);struct stat st;assert(!stat(source,&st));
