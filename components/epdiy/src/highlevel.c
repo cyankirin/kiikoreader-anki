@@ -244,20 +244,6 @@ static enum EpdDrawError hl_update_area(
         return EPD_DRAW_SUCCESS;
     }
 
-#if KIIKO_BOARD_METALIO47
-    // S31 retains its existing aligned scan/commit contract.
-#else
-    // Keep aligned interlacing, then mask its padding even for full-pixel GL16.
-    // Equal-gray LUT entries can contain black pulses, so equal framebuffer
-    // values alone cannot protect the unread progress track.
-    const int crop_end = area.x + area.width;
-    memset(state->dirty_columns, 0, (size_t)(area.x / 2));
-    if (area.x & 1) state->dirty_columns[area.x / 2] &= 0xF0;
-    if (crop_end & 1) state->dirty_columns[crop_end / 2] &= 0x0F;
-    memset(state->dirty_columns + (crop_end + 1) / 2, 0,
-           (size_t)(epd_width() / 2 - (crop_end + 1) / 2));
-#endif
-
     uint32_t t1 = esp_timer_get_time() / 1000;
 
     diff_area.x = 0;
@@ -279,14 +265,14 @@ static enum EpdDrawError hl_update_area(
 
     uint32_t t2 = esp_timer_get_time() / 1000;
 
-    // Commit only the physical scan bounds; never consume deferred pixels outside them.
+    // 中文：回写范围与差分实际算过的列段一致 —— 驱动的是这段，标记为已显示的也只能是这段。
+    //       rc105 曾把驱动裁剪到请求矩形、回写仍按矩形，跳列驱动在面板上累积成片黑；
+    //       这里恢复 rc102 的整段驱动契约（S31 与 Pico 一致）。
+    // / Drive and commit the same aligned segment. rc105 masked the drive to the requested
+    //   rectangle while committing it, and column-skipped driving accumulated into black
+    //   patches on the panel; this restores the rc102 contract for both boards.
     int x_start, x_stop;
-#if KIIKO_BOARD_METALIO47
     epd_difference_column_range(area, &x_start, &x_stop);
-#else
-    x_start = area.x;
-    x_stop = area.x + area.width;
-#endif
     diff_area.x = x_start;
     diff_area.y = 0;
     diff_area.width = x_stop - x_start;

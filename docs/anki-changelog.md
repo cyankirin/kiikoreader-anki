@@ -23,6 +23,18 @@
         fails when the log and the firmware version drift apart.
 -->
 
+## 0.3.3-rc105.02 — 2026-11-11
+
+### 修复
+- 阅读页长时间使用后出现成片黑斑。rc105 的 `96b96e8` 把 Pico 局部刷新的驱动列裁剪到请求矩形，回写却仍按矩形进行；被跳过的列在面板上逐次翻页累积电荷，最终连成黑块。现已恢复 rc102 的契约：驱动、扫描与回写都落在同一个差分对齐段（S31 未受影响）。
+  Fixed black patches after long reading. rc105's `96b96e8` masked the Pico drive to the requested rectangle while still committing it, so skipped columns accumulated charge turn after turn. The rc102 contract is back: drive, scan and commit all cover the same aligned segment (S31 untouched).
+- 新增 `tools/display_commit_contract_host_test.py`，以源码断言锁住"驱动=回写"契约，并已接入 CI，防止裁剪逻辑再次回潮。
+  Added `tools/display_commit_contract_host_test.py`, a source-level guard on the drive-equals-commit contract, wired into CI.
+
+### 已知限制
+- 恢复整段驱动后，沉浸阅读时页脚未读进度线在局部刷新中可能重新出现轻微闪动（rc105 曾以裁剪规避，代价就是这次的黑斑）。
+  With segment-wide driving restored, the unread footer progress track may flicker slightly during partial refreshes in immersive reading — rc105 avoided that by masking, which caused these black patches.
+
 ## 0.3.3-rc105.01 — 2026-11-05
 
 ### 新增

@@ -57,6 +57,7 @@ jobs:
           python3 tools/shelf_pager_host_test.py
           python3 tools/quick_layer_raster_host_test.py
           python3 tools/test_epd_difference_bounds.py --check-regression
+          python3 tools/display_commit_contract_host_test.py
           python3 tools/pico_reader_crop_host_test.py
           sh tools/run_app_loop_host_tests.sh
           python3 tools/reader_spacing_host_test.py
