@@ -110,8 +110,18 @@ jobs:
         if: matrix.board == 'pico'
         shell: bash
         run: |
-          apt-get update -qq
-          apt-get install -y --no-install-recommends zlib1g-dev
+          # The IDF container occasionally loses DNS for archive.ubuntu.com (apt-get
+          # update then returns only warnings and the package index stays empty).
+          # Retry a few times instead of red-lighting the firmware gate on that, and
+          # verify the header + linker are really usable before running the probe.
+          for attempt in 1 2 3; do
+            if apt-get update -qq && apt-get install -y --no-install-recommends zlib1g-dev; then
+              break
+            fi
+            echo "apt attempt ${attempt} failed, retrying in 10s" >&2
+            sleep 10
+          done
+          printf '#include <zlib.h>\nint main(void){return 0;}\n' | cc -x c - -lz -o /tmp/kiiko-zlib-check
           python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/bookmark-tests/${{ matrix.board }}
           KIIKO_TEST_BOARD="${{ matrix.board }}" \
           KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \

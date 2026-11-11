@@ -984,7 +984,7 @@ int main(void) {
     clear_selection();toggle_selection(0);toggle_selection(14);
     char identity0[288],identity1[288];strcpy(identity0,s_shelf[0].path);strcpy(identity1,s_shelf[14].path);
     EpdRect menu=bulk_filter_rect(1);assert(bulk_action(&ctx,menu.x+10,menu.y+10)==APP_REDRAW_PAGE&&s_sort_menu);
-    for(int mode=0;mode<3;++mode)for(int desc=0;desc<2;++desc){
+    for(int mode=0;mode<4;++mode)for(int desc=0;desc<2;++desc){
         EpdRect choice=bulk_sort_rect(mode);bulk_action(&ctx,choice.x+5,choice.y+5);
         choice=bulk_sort_rect(desc?5:4);bulk_action(&ctx,choice.x+5,choice.y+5);
         assert(selected_count()==2&&shelf_order_mode()==mode&&shelf_order_desc()==(bool)desc);
@@ -992,23 +992,36 @@ int main(void) {
     }
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&!s_sort_menu&&s_view==BULK&&selected_count()==2);
 
-    // 主书架三模式菜单不穿透，保留管理中的升降序；导入返回原管理分页。
-    // Main sorting owns contacts, retains management direction settings, and import returns to its management page.
+    // rc106 主书架排序面板有 4 档依据 + 同面板升降序按钮：选中依据后面板保持打开，
+    // 便于接着切换方向。只有跨行/面板外点击与返回键才关闭面板。
+    // rc106's shelf panel has four sort keys plus in-panel direction buttons. Choosing a
+    // key keeps the panel open; only crossing/outside taps and Back dismiss it.
     s_view=SHELF;test_shelf_style=5;s_batch_confirm=false;s_clear_confirm=false;s_scan_pending=false;
     EpdRect manage_header=shelf_manage_rect(),sort_header=shelf_sort_rect();
     assert(manage_header.x==420&&manage_header.x+manage_header.width<=sort_header.x);
     assert(!ui_rect_hit((EpdRect){24,79,326,74},manage_header.x,110));
-    const unsigned orders[]={1,5,0};
-    for(int i=0;i<3;++i){
-        s_shelf_order=orders[(i+1)%3];s_sort_menu=true;ctx.leaf=2;
+    const int sort_modes[]={1,2,0,3};            // 最近阅读 / 添加时间 / 书名 / 阅读进度
+    const unsigned sort_start[]={0,0,3,0};    // 与待选档不同，走默认方向分支
+    const unsigned sort_want[]={1,5,0,7};    // shelf_order_apply 的 0..7 编码
+    for(int i=0;i<4;++i){
+        s_shelf_order=sort_start[i];s_sort_menu=true;ctx.leaf=2;
         EpdRect row=shelf_sort_menu_rect(i);
         ui_gesture_event_t event={.type=UI_GESTURE_TAP,.x0=row.x+10,.y0=row.y+10,.x=row.x+12,.y=row.y+12};
-        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_sort_menu&&s_shelf_order==orders[i]&&ctx.leaf==0);
-        assert(s_recent_sort==(i==0));
+        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
+               s_shelf_order==sort_want[i]&&ctx.leaf==0&&s_recent_sort==(sort_modes[i]==1));
+        // 重复点同一档保留既有方向，不回落到默认方向。
+        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
+               s_shelf_order==sort_want[i]);
     }
+    // 面板内升降序按钮：只翻方向，不关闭面板。
+    s_shelf_order=3;s_sort_menu=true;ctx.leaf=2;
+    ui_gesture_event_t descending={.type=UI_GESTURE_TAP,.x0=520,.y0=500,.x=522,.y=502};
+    assert(shelf_sort_gesture(&ctx,&descending)==APP_REDRAW_PAGE&&s_sort_menu&&s_shelf_order==1);
+    ui_gesture_event_t ascending={.type=UI_GESTURE_TAP,.x0=400,.y0=500,.x=402,.y=502};
+    assert(shelf_sort_gesture(&ctx,&ascending)==APP_REDRAW_PAGE&&s_sort_menu&&s_shelf_order==3);
     s_shelf_order=3;s_sort_menu=true;
     ui_gesture_event_t same_sort={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=185};
-    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&!s_sort_menu);
+    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&s_sort_menu);
     s_sort_menu=true;ui_gesture_event_t crossing={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=275};
     shelf_sort_gesture(&ctx,&crossing);assert(!s_sort_menu&&s_shelf_order==3);
     s_sort_menu=true;crossing=(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=150,.y0=700,.x=150,.y=700};
@@ -1021,7 +1034,7 @@ int main(void) {
     assert(import_finish(&ctx)==APP_REDRAW_PAGE&&s_view==BULK&&ctx.leaf==2&&selected_count()==selected_before_import);
     s_view=IMPORT;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&s_view==BULK&&ctx.leaf==2);
     s_batch_confirm=true;assert(bulk_action(&ctx,import.x+5,import.y+5)==APP_REDRAW_NONE&&s_view==BULK);s_batch_confirm=false;
-    puts("PASS: shelf compact sort modes, persisted direction, crossing/outside tap isolation, relocated import and management-page return");
+    puts("PASS: shelf four-mode sort panel, persisted direction, crossing/outside tap isolation, relocated import and management-page return");
     free(s_shelf);free(s_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
