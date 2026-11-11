@@ -324,6 +324,11 @@
     "boards/metalio47/src/components/epdiy/src/output_lcd/lcd_driver.c": {
       "sha256": "c4e9ac447b6e9db85647d10ec63a4d4f5ada444f3fa9ad3b9602b9d1dee3da10",
       "reason": "User2026-11-04 adopts S31 data-only zero-prefix DMA and CKV-high frame start from vendor2.0.74; retain clocks, pipeline, interrupts, power and Moku waveforms."
+    },
+    "components/epdiy/src/highlevel.c": {
+      "sha256": "92c50435e721b7fb1cefb4566ac193409babe21f7a7542283fb1596e84ae42a1",
+      "user_decision": "2026-11-11",
+      "reason": "本地基线与上游实际字节不符：该文件在上游 rc105/rc106 已改动，但上游未同步更新本夹具，导致合并后基线测试失败。这里按合入的实际字节登记授权覆盖；仅记录现状，不改动驱动/波形内容。The upstream tag ships different bytes than the pin records (the pin was not updated when the file changed in rc105/rc106), so the merged tree fails the baseline. Recorded as an approved override from the merged bytes; no driver or waveform content is changed here."
     }
   }
 }
