@@ -48,8 +48,8 @@ typedef struct {int type,x0,y0,x,y;} ui_gesture_event_t;
 #define EPD_DRAW_ALIGN_CENTER 1
 #define SETTINGS_SCROLL_MAX 1000
 static int s_page=SETTINGS_SHELF_STYLE,s_style_scroll,s_main_scroll,s_ble_scroll,viewport=1088,style=2;
-static bool s_scroll_drag_consumed,s_scroll_present_pending,s_main_wifi_saved;
-static char s_main_wifi[33];
+static bool s_scroll_drag_consumed,s_scroll_present_pending __attribute__((unused)),s_main_wifi_saved __attribute__((unused));
+static char s_main_wifi[33] __attribute__((unused));
 static unsigned glass,acrylic,headers,footers,cards,titles;
 static int settings_viewport_end(void){return viewport;}
 static int settings_content_end(void){return viewport;}
@@ -91,18 +91,32 @@ static int ui_content_width(void){return 612;}
 '''
 unit+='\n'.join(line for line in (root/'main/ui/ui_book_manage_layout.h').read_text().splitlines() if not line.startswith(('#include','#pragma')))+'\n'
 unit+='static bool s_bulk_grid;\n'
+unit+='// 上游给书架样式页加了「保存失败提示」与「从书架管理页进入」的收尾分支；探针按真实实现切片，\n'
+unit+='// 这里只补它需要的外部符号。\n'
+unit+='// Upstream added a save-failure notice and a "came from the shelf manager" exit; the probe\n'
+unit+='// slices the real finish function, so only its outside symbols are stubbed here.\n'
+unit+='static char s_notice[96] __attribute__((unused));\n'
+unit+='static bool s_shelf_style_from_manage __attribute__((unused));\n'
+unit+='static void app_book_return_from_shelf_style(void){}\n'
+unit+='typedef struct app_ctx_s{bool request_return;void *request_app;} app_ctx_t;\n'
+unit+='// 上游的列表拖动接管入口：本探针只验证离散一步，返回 false 表示不接管。\n'
+unit+='static bool settings_drag_gesture(app_ctx_t*c,const ui_gesture_event_t*e,int*off,int limit,app_redraw_t*r){(void)c;(void)e;(void)off;(void)limit;(void)r;return false;}\n'
+unit+='static struct{bool tracking;int origin_offset,origin_y;} s_list_drag __attribute__((unused));\n'
 for name in ('shelf_rows','row_rect','shelf_cover_image'):
     unit += function(name,root/'main/apps/app_book.c')+'\n'
 unit += catalog + '\n' + count + '\n' + function('draw_style_thumbnail', source) + '\n'
 unit += 'static void paint(uint8_t *fb){' + render + '}\n'
+unit += function('shelf_style_finish', source) + '\n'
 unit += function('scroll_gesture', source) + '\n'
-unit += 'static app_redraw_t scroll_event(const ui_gesture_event_t *ev){' + scroll + 'return APP_REDRAW_NONE;}\n'
-unit += 'static app_redraw_t tap(int x,int y){ui_gesture_event_t e={.type=UI_GESTURE_TAP,.x0=x,.y0=y};const ui_gesture_event_t *ev=&e;' + choose + 'return APP_REDRAW_NONE;}\n'
+unit += 'static app_redraw_t scroll_event(const ui_gesture_event_t *ev){app_ctx_t ctx_store __attribute__((unused))={0};app_ctx_t *ctx __attribute__((unused))=&ctx_store;' + scroll + 'return APP_REDRAW_NONE;}\n'
+unit += 'static app_redraw_t tap(int x,int y){app_ctx_t ctx_store __attribute__((unused))={0};app_ctx_t *ctx __attribute__((unused))=&ctx_store;ui_gesture_event_t e={.type=UI_GESTURE_TAP,.x0=x,.y0=y};const ui_gesture_event_t *ev=&e;' + choose + 'return APP_REDRAW_NONE;}\n'
 unit += r'''
 int main(void){
  const int expected[]={1,2,6,5};uint8_t fb=0;
  for(unsigned choice=0;choice<4;++choice){
-  style=expected[choice];int rows=style==5?4:9;assert(shelf_rows()==rows);
+  // 上游现在的列表样式每页 8 本（BOOK_GRID_ROWS 仍是 9）。
+  // Upstream's list style now lays out 8 rows per page while BOOK_GRID_ROWS stays 9.
+  style=expected[choice];int rows=style==5?8:9;assert(shelf_rows()==rows);
   for(int i=0;i<rows;++i){EpdRect hit=row_rect(i),cover=shelf_cover_image(i);
    assert(cover.x>=36&&cover.x+cover.width<=648&&cover.y>=184&&cover.y+cover.height<=972);
    assert(cover.x>=hit.x&&cover.x+cover.width<=hit.x+hit.width&&cover.y>=hit.y&&cover.y+cover.height<=hit.y+hit.height);
