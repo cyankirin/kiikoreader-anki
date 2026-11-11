@@ -110,18 +110,32 @@ jobs:
         if: matrix.board == 'pico'
         shell: bash
         run: |
-          # The IDF container occasionally loses DNS for archive.ubuntu.com (apt-get
-          # update then returns only warnings and the package index stays empty).
-          # Retry a few times instead of red-lighting the firmware gate on that, and
-          # verify the header + linker are really usable before running the probe.
-          for attempt in 1 2 3; do
-            if apt-get update -qq && apt-get install -y --no-install-recommends zlib1g-dev; then
-              break
-            fi
-            echo "apt attempt ${attempt} failed, retrying in 10s" >&2
-            sleep 10
-          done
-          printf '#include <zlib.h>\nint main(void){return 0;}\n' | cc -x c - -lz -o /tmp/kiiko-zlib-check
+          # The bookmark probe compiles libpng sources and needs zlib headers/-lz.
+          # The IDF container ships libz.so.1 but not the dev package, and its apt
+          # mirrors are sometimes unreachable (DNS outage). Prefer the normal
+          # install; on failure build a small static zlib from the checked-in
+          # vendor sources so this gate never depends on the network.
+          zlib_check() {
+            printf '#include <zlib.h>\nint main(void){return 0;}\n' |
+              cc -x c - -lz -o /tmp/kiiko-zlib-check
+          }
+          if ! zlib_check 2>/dev/null; then
+            apt-get update -qq && apt-get install -y --no-install-recommends zlib1g-dev || true
+          fi
+          if ! zlib_check 2>/dev/null; then
+            echo "apt unavailable; building the checked-in zlib for the host probe" >&2
+            zlib_src="$PWD/tools/simulator/web/vendor/zlib"
+            zlib_sys="$RUNNER_TEMP/kiiko-zlib"
+            mkdir -p "$zlib_sys/include" "$zlib_sys/lib"
+            cp "$zlib_src/zlib.h" "$zlib_src/zconf.h" "$zlib_sys/include/"
+            for src in "$zlib_src"/*.c; do
+              cc -O2 -I"$zlib_sys/include" -c "$src" -o "$zlib_sys/lib/$(basename "$src" .c).o"
+            done
+            ar rcs "$zlib_sys/lib/libz.a" "$zlib_sys/lib"/*.o
+            export CPATH="$zlib_sys/include"
+            export LIBRARY_PATH="$zlib_sys/lib"
+          fi
+          zlib_check
           python3 tools/board_source_view.py --board "${{ matrix.board }}" --tests --output build/bookmark-tests/${{ matrix.board }}
           KIIKO_TEST_BOARD="${{ matrix.board }}" \
           KIIKO_LIBPNG_PATH="$PWD/build/boards/${{ matrix.board }}/source/managed_components/espressif__libpng/libpng" \
