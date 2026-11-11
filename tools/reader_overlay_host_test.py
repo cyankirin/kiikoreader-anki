@@ -19,6 +19,7 @@ unit = r'''
 #define UI_LOCK_WIDTH 684
 #define UI_LOCK_HEIGHT 1216
 #define UI_GRAY_WHITE 255
+#define UI_GRAY_BLACK 0
 #define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_LIGHT 192
 #define READER_TOOL_ICON_PX 40
@@ -76,6 +77,9 @@ static void ttf_draw_text_px(uint8_t *fb,int x,int y,int px,const char *text,int
 }
 static void draw_reader_metadata(uint8_t *fb,size_t page){(void)page;ui_fill_rect_fast(ui_reader_footer_for(s_reader_fullscreen,immersive),238,fb);}
 static void ui_fill_round_rect(uint8_t *fb,EpdRect r,int radius,int color){if(radius==16)note_card=r;ui_fill_rect_fast(r,color,fb);}
+// 只描边、不填充：本探针断言的是覆盖层像素，描边不参与其中。
+// Outline only: this probe asserts overlay pixels, which the stroke does not touch.
+static void ui_draw_round_rect(uint8_t *fb,EpdRect r,int radius,int color){(void)fb;(void)r;(void)radius;(void)color;}
 static void ui_text_vc(uint8_t *fb,int x,int y,int px,const char *text,int align,bool inverse){(void)fb;(void)x;(void)y;(void)px;(void)text;(void)align;(void)inverse;}
 static bool reader_chapter_undo_visible(void){return false;}
 static EpdRect reader_chapter_undo_rect(void){return(EpdRect){0,0,20,20};}

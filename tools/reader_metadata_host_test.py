@@ -29,6 +29,10 @@ typedef struct {void *hl;int64_t now_ms;bool consumed,request_app,request_return
 #define UI_NAV_BACKGROUND_GRAY 0xe0
 #define UI_GRAY_BLACK 0
 static int s_view=READING,s_reader_panel=READER_PANEL_NONE,E0470_FOLLOW_WAVEFORM;
+// 上游把状态栏判定拆成了独立函数；本探针的 s_reader_panel 恒为 NONE，
+// 真实实现在这里恒返回 true。/ Upstream split the status-bar check into its own
+// function; with s_reader_panel fixed at NONE the real implementation is always true.
+static bool app_book_status_bar_visible(void){return true;}
 static bool immersive;
 static bool app_settings_reader_immersive(void){return immersive;}
 static bool s_reader_fullscreen=false,s_toolbar,s_clear_confirm,s_reader_footer_pending,s_save_failed;

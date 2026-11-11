@@ -78,23 +78,51 @@ OTA_MINIMUM_BASE = "0.3.3-rc72"
 OTA_NOTES_MAX = 383
 OTA_NOTES = "Anki 版：导入 .apkg 复习，保留设置与阅读记录。"
 
-# 中文：设备升级页只显示六行、约 120 个汉字，所以清单里的 notes 取本仓变更日志首条的前几条，
-#       每条截到第一个句号，超出屏幕容量时以省略号收尾。之前这里是一句固定文案，用户看不到
-#       这版到底改了什么。
-# English: The device upgrade page shows six lines (about 120 CJK characters), so the manifest
-#          notes come from this fork's changelog head: the first bullets, each cut at its first
-#          sentence, truncating with an ellipsis when the screen runs out. This used to be one
-#          fixed sentence, which told the user nothing about the release.
+# 中文：设备升级页约六行、120 个汉字。notes 从本仓变更日志当前版本条目里挑要点：先放
+#       「新增/变更」里合并上游的条目（用户最想知道源仓库更新了什么），再放「修复」的简短
+#       标题；按整条取舍而不是硬裁字符，避免把句子切成半截。
+# English: The upgrade page fits ~120 CJK characters. Notes pick highlights from this fork's
+#          changelog entry for the version: upstream-merge bullets first (that is what users
+#          asked to see), then compact fix labels. Whole items are dropped when the page fills,
+#          never cut mid-sentence.
 OTA_NOTES_BULLETS = 4
 OTA_NOTES_CHARS = 118
+OTA_UPSTREAM_HINTS = ("上游", "官方", "合并", "rc1", "upstream", "Merged")
 
 def changelog_path() -> Path:
     """Repository changelog, independent of where the site is staged to."""
     return Path(__file__).resolve().parents[1] / "docs/anki-changelog.md"
 
 
+def _clean_bullet(text: str) -> str:
+    """Strip markdown and keep the first Chinese sentence of one changelog bullet."""
+    text = text.replace("**", "").replace("`", "").strip()
+    cut = text.find("。")
+    if cut != -1:
+        text = text[:cut]
+    return text.strip("；，、 ")
+
+
+def _bullet_label(bullet: str) -> str:
+    """A fix bullet is a long explanation; its part before the colon names the problem."""
+    head = bullet.split("：")[0].split(":")[0].strip()
+    return head if len(head) >= 6 else bullet
+
+
+def _fit_sentence(text: str) -> str:
+    """Cut one over-long item at a punctuation boundary instead of mid-word."""
+    if len(text) <= OTA_NOTES_CHARS:
+        return text
+    window = text[:OTA_NOTES_CHARS]
+    for mark in ("；", "，", "、", "："):
+        at = window.rfind(mark)
+        if at >= OTA_NOTES_CHARS // 2:
+            return window[:at].rstrip("；，、 ")
+    return window.rstrip("；，、 ") + "…"
+
+
 def ota_notes_for(version: str) -> str:
-    """First bullets of this fork's changelog entry for `version`, fitted to the device page."""
+    """Highlights of this fork's changelog entry for `version`, fitted to the device page."""
     path = changelog_path()
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -107,26 +135,49 @@ def ota_notes_for(version: str) -> str:
             break
     if start is None:
         return OTA_NOTES
-    bullets: list[str] = []
+
+    sections: dict[str, list[str]] = {}
+    section = ""
     for line in lines[start:]:
         if line.startswith("## "):
             break
+        if line.startswith("### "):
+            section = line[4:].strip()
+            continue
         if not line.startswith("- "):
             continue
-        text = line[2:].replace("**", "").replace("`", "").strip()
-        cut = text.find("。")
-        if cut != -1:
-            text = text[:cut]
+        text = _clean_bullet(line[2:])
         if text:
-            bullets.append(text)
-        if len(bullets) >= OTA_NOTES_BULLETS:
+            sections.setdefault(section, []).append(text)
+
+    added = [b for key in ("新增", "Added", "变更", "Changed")
+             for b in sections.get(key, [])]
+    fixed = [b for key in ("修复", "Fixed") for b in sections.get(key, [])]
+
+    picked: list[str] = []
+    # The upstream merge line is what the device user asked to see.
+    for bullet in added:
+        if any(hint in bullet for hint in OTA_UPSTREAM_HINTS):
+            picked.append(bullet)
             break
-    if not bullets:
+    labels = [_bullet_label(b) for b in fixed]
+    if labels:
+        picked.append("修复" + "、".join(labels))
+    for bullet in added:
+        if bullet not in picked and len(picked) < OTA_NOTES_BULLETS:
+            picked.append(_bullet_label(bullet))
+    if not picked:
         return OTA_NOTES
-    notes = "；".join(bullets)
-    if len(notes) > OTA_NOTES_CHARS:
-        notes = notes[:OTA_NOTES_CHARS].rstrip("；，、 ") + "…"
-    else:
+
+    notes = ""
+    for item in picked[:OTA_NOTES_BULLETS]:
+        candidate = f"{notes}；{item}" if notes else item
+        if len(candidate) + 1 > OTA_NOTES_CHARS:  # leave room for the final full stop
+            break
+        notes = candidate
+    if not notes:
+        notes = _fit_sentence(picked[0])
+    if not notes.endswith(("。", "…")):
         notes += "。"
     encoded = notes.encode("utf-8")
     if len(encoded) > OTA_NOTES_MAX:

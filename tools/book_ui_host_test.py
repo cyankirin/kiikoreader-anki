@@ -457,6 +457,19 @@ static app_reader_key_action_t app_settings_reader_key_action(unsigned key){retu
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 '''
+# 上游 rc106 同步源给书架页加了排序落库、跳设置页和阅读控制暂停分支；本探针只验证
+# 书架 UI 的布局与命中，按真实签名给这些外部符号补桩即可。
+# Upstream's rc106 sync source added shelf-order persistence, a jump into the settings
+# app and reader-control pause hooks. This probe only checks shelf UI, so stub them.
+unit += r'''
+static bool s_rc_double_pending,s_manage_style_restore;
+static void rc_pause_auto(void){}
+static void rc_stop_auto(void){}
+static void rc_cancel_side(void){}
+static bool shelf_order_apply(app_ctx_t*ctx,int mode,bool desc){(void)ctx;(void)mode;(void)desc;return true;}
+static void app_device_settings_request_shelf_style(void){}
+static const app_desc_t app_device_settings={0};
+'''
 unit += r"""
 #define SHELF_CATEGORY_LIMIT 128
 typedef struct{char path[288];int pages[2],count;bool available;}shelf_category_t;
