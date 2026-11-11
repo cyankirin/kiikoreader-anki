@@ -760,6 +760,9 @@ void ble_pt_poll(void) {}
 bool pico_online_busy(void) { return online_busy; }
 
 uint8_t app_settings_auto_lock_minutes(void){return idle_minutes;}
+// 上游把「唤醒时取走待机按键」拆成独立接口；本探针不模拟待机队列。
+// Upstream split "take the standby presses on wake" into its own call; this probe has no queue.
+bool ble_pt_take_standby(void){return false;}
 uint32_t ble_pt_input_serial(void){return 0;}
 
 

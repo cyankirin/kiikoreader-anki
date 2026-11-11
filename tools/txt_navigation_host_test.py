@@ -123,7 +123,14 @@ int main(int argc,char **argv){
  assert(argc==2);FILE *manifest=fopen(argv[1],"r");assert(manifest);
  char path[256],expected[272],last[256]={0};unsigned fixtures=0;
  while(fscanf(manifest,"%255s %271s",path,expected)==2){
-  verify(path,expected);unsigned hits=cache_hits;verify(path,expected);assert(cache_hits>hits);
+  verify(path,expected);
+  // 上游把章节数摘要缓存接到书架侧：开书时写入，书架先问 book_cached_chapter_count 才读缓存。
+  // 这里按同一顺序问一次，确认命中且数值与开书结果一致。
+  // Upstream moved the chapter-count summary behind the shelf: the open writes it and the shelf
+  // asks book_cached_chapter_count first. Ask once here and require a hit with the same count.
+  {struct stat st;assert(!stat(path,&st));unsigned hits=cache_hits;
+   assert(book_cached_chapter_count(path,(uint32_t)st.st_size,(int64_t)st.st_mtime)==(uint16_t)book_chapter_count());
+   assert(cache_hits>hits);}
   char cache[272];snprintf(cache,sizeof(cache),"%s.idx",path);
   FILE *f=fopen(cache,"r+b");assert(f&&!fseek(f,sizeof(book_index_cache_header_t)+offsetof(txt_cache_payload_t,checksum),SEEK_SET));
   int c=fgetc(f);assert(c!=EOF&&!fseek(f,-1,SEEK_CUR)&&fputc(c^1,f)!=EOF&&!fclose(f));
