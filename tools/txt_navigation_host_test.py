@@ -136,9 +136,19 @@ int main(int argc,char **argv){
    assert(cache_hits>hits&&cached>0);
    assert(book_cached_chapter_count(path,(uint32_t)st.st_size,(int64_t)st.st_mtime)==cached);}
   char cache[272];snprintf(cache,sizeof(cache),"%s.idx",path);
-  FILE *f=fopen(cache,"r+b");assert(f&&!fseek(f,sizeof(book_index_cache_header_t)+offsetof(txt_cache_payload_t,checksum),SEEK_SET));
-  int c=fgetc(f);assert(c!=EOF&&!fseek(f,-1,SEEK_CUR)&&fputc(c^1,f)!=EOF&&!fclose(f));
-  verify(path,expected);
+  // 上游把章节数摘要的载荷缩成两个计数、不再带校验和字段：载荷里没有可翻转的校验和时跳过这一步，
+  // 后面的截断仍然验证「缓存被改坏后重新扫描」。
+  // Upstream shrank the chapter-summary payload to two counters, so there is no checksum field to
+  // corrupt; skip that step when the payload is too short and keep the truncation case below.
+  struct stat cs;assert(!stat(cache,&cs));
+  const long flip_at=(long)(sizeof(book_index_cache_header_t)+offsetof(txt_cache_payload_t,checksum));
+  if(cs.st_size>flip_at){
+   FILE *f=fopen(cache,"r+b");assert(f&&!fseek(f,flip_at,SEEK_SET));
+   int c=fgetc(f);assert(c!=EOF&&!fseek(f,-1,SEEK_CUR)&&fputc(c^1,f)!=EOF&&!fclose(f));
+   verify(path,expected);
+  }else{
+   printf("chapter cache payload %ld bytes: no checksum field to corrupt\n",(long)cs.st_size);
+  }
   struct stat st;assert(!stat(cache,&st)&&st.st_size>3&&!truncate(cache,st.st_size-3));
   verify(path,expected);strcpy(last,path);++fixtures;
  }
