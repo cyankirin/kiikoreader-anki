@@ -466,7 +466,10 @@ static bool s_rc_double_pending,s_manage_style_restore;
 static void rc_pause_auto(void){}
 static void rc_stop_auto(void){}
 static void rc_cancel_side(void){}
-static bool shelf_order_apply(app_ctx_t*ctx,int mode,bool desc){(void)ctx;(void)mode;(void)desc;return true;}
+static bool app_settings_try_shelf_order(unsigned order){(void)order;return true;}
+// 真实实现排在切片函数之后，这里先给 bulk_action / shelf_sort_gesture 一个声明。
+// The real body is appended after the sliced helpers; declare it for the callers first.
+static bool shelf_order_apply(app_ctx_t*ctx,int mode,bool desc);
 static void app_device_settings_request_shelf_style(void){}
 static const app_desc_t app_device_settings={0};
 '''
@@ -499,6 +502,9 @@ for name in ("app_book_reader_open", "inline_ink_gray", "reader_margin_width", "
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
 unit += "static unsigned app_settings_system_font_size(void){return 100;}\n"
+# 排序落库的真实实现：no-op 桩会让后面 s_shelf_order 的断言失真。
+# Real sort persistence: a no-op stub would invalidate the later s_shelf_order asserts.
+unit += function('shelf_order_apply') + "\n"
 for name in ("apply_reader_layout", "reader_ui_extra", "reader_slider_rect", "reader_slider_map", "reader_slider_begin", "reader_slider_move", "reader_slider_commit"):
     unit += function(name) + "\n"
 unit += r'''
@@ -786,7 +792,7 @@ int main(void) {
     assert(bulk_turn_page(&ctx,1)==APP_REDRAW_NONE);
     EpdRect sort_name=bulk_sort_rect(0);
     assert(bulk_action(&ctx,sort_name.x+20,sort_name.y+20)==APP_REDRAW_PAGE&&selected_count()==1);
-    EpdRect sort_done=bulk_sort_rect(5);
+    EpdRect sort_done=bulk_sort_rect(6);
     assert(bulk_action(&ctx,sort_done.x+20,sort_done.y+20)==APP_REDRAW_PAGE&&!s_sort_menu&&selected_count()==1);
     assert(bulk_action(&ctx,600,267)==APP_REDRAW_PAGE&&!s_bulk_selecting&&!selected_count());
     assert(bulk_select_row(&ctx,0)==APP_REDRAW_PAGE);
