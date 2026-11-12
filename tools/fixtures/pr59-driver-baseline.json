@@ -1,5 +1,5 @@
 {
-  "source_commit": "dc9c26cbf52dbd4b67bad0a29272575da57282d7",
+  "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
   "sha256": {
     "CMakeLists.txt": "662b5caf1c3637889478362436927f00c31622a5b4e7dc2371a631df16dbafa2",
     "boards/metalio47/src/components/e0470_epaper_waveform/e0470_epaper_waveform.c": "79f0a33764f19df4571cc9f6f366ef7e3b89d6a1179cc66bcb309686618c8ab6",
@@ -35,7 +35,7 @@
     "boards/pico/src/components/epdiy/src/output_lcd/lcd_driver.c": "7287dffa1d5380b94b36076493a81b9607ca108c9f677e89cf9b932f22628b0c",
     "boards/pico/src/components/epdiy/src/output_lcd/render_lcd.c": "3650a642db5803ce6c82b4fc73d3b170df6bf99d7392e81559616548f8d664a5",
     "boards/pico/src/components/epdiy/src/render.c": "9411782c9bcb08d362184885793a0c185a6694afcabd53810177d20bbc597e1d",
-    "boards/pico/src/components/read_pico/read_pico_board.c": "8411bf5b9d6699f0d98cc05cf5f865ca60e603474f07a2db19b97409829c8b6e",
+    "boards/pico/src/components/read_pico/read_pico_board.c": "79f262c6a1b6f07c30ca37cc5b063830636fc492cfd328972a98a18da239f5cf",
     "boards/pico/src/components/read_pico/read_pico_epd_timing.c": "8769d20993d8f2f00a7cff1f7b25f8fdceaf034c99549b07e03c9c3942f30d85",
     "boards/pico/src/components/read_pico/read_pico_init.c": "2f615cd0e7fec612be5d1bfaca54bb9c55f92a091cc9eebd8734ce0f052d3f31",
     "boards/pico/src/components/read_pico/read_pico_sd.c": "77fd3bc2a86abd1d45e9916424dd03c1482713e96d45b2992c96f16f3e701a58",
@@ -159,7 +159,7 @@
     "components/read_pico/include/buzzer_duty_map.h": "cdac7fa9f480f6915d5713ee77763e5e31a0a8f0e6ec2f13e9814244fa2f1a69",
     "components/read_pico/include/buzzer_score.h": "c6a481fa3018d445974118c35a5d62348c0dbcbffec6383471bf89f546235320",
     "components/read_pico/include/read_pico.h": "ada7311a774a7122437c73dc4485f9963624d0f0ccaf8ffa7897ac7724072187",
-    "components/read_pico/include/read_pico_board.h": "d79f3224c42b84728dcdf629ca237aa467508782c21e7289c97af96fc8cc5879",
+    "components/read_pico/include/read_pico_board.h": "5c99caf9935eac1c05ab88dfdc2ef090277ce63bbaa6826f44d39e5f7f19ac40",
     "components/read_pico/include/read_pico_buzzer.h": "d3e5deea5ba69e041a338d3e9cc6da65d4a26a0dc238ea0f73d9bbac47281d2a",
     "components/read_pico/include/read_pico_crashlog.h": "af4cfcc5431decb25809f8848408a3640d2385070e2973716d088ba097ab18f9",
     "components/read_pico/include/read_pico_epd_timing.h": "154773f8a8c3112d635552139419f97f5c810ceeca76a3e2e43b1b708424309e",
@@ -220,9 +220,9 @@
   },
   "approved_overrides": {
     "boards/pico/src/main/sleep.c": {
-      "sha256": "7c6b16ce79b251024c4170f690e52fba23ff96b0b67a9710fc83b1bfe3c1a411",
-      "user_decision": "用户2026-11-04要求Pico四种锁屏样式一起优化且保留保护：正常锁屏/浅睡解锁单次GC16、页面恢复后重启网络，拼贴提示只局部GC16；反馈/绘图/输出失败保留原清屏，缓存/PIN/深睡策略及波形不变。 / User2026-11-04 extends the Pico optimization to all four lock styles: one GC16 lock/light-wake restore, deferred network restart and local GC16 collage feedback; retain clearing on feedback/art/output failure and preserve cache/PIN/deep-sleep/waveform behavior. 用户2026-11-04报告透明书封透字并要求修复：仅透明书封入锁增加一次原GC16白目标后输出最终图，不改原表、供电与解锁逻辑，分配/显示失败沿用清屏兜底。 / User2026-11-04 authorizes one calibrated white GC16 target before transparent-cover art to address ghosting, retaining raw tables, power, unlock logic and allocation/display-failure recovery. 用户确认透明书封不再透字后要求其他类型一并修复：将一次GC16白目标+最终图扩展到Pico四种锁屏，异常清屏与解锁保护保持。 / After device confirmation, the user requests the same white-target plus final-image sequence for all four Pico lock styles, retaining failure recovery and unlock protection.",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "f859b31a51607870fbeb1f51fbb9620974112018cec32d84fadb497f8fbb2102",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "main/sleep.h": {
       "sha256": "0c067e19583e5ee75fd726f0bf773482b280346b795f88fd80ec2f175b99f4c5",
@@ -244,10 +244,9 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "boards/pico/src/main/display_reader_waveform.c": {
-      "sha256": "231de8d85f6b6d9d7575ec37f18021c1b9d058ecd584ddbb18cdbf5fb2f10d19",
-      "pull_request": 68,
-      "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "e535449d9d50badfd32b2d0b2dfc5cfab46af45a333067a4df6f919188115895",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "boards/metalio47/src/main/display_reader_waveform.c": {
       "sha256": "e256413af08373f8cd394fd09ef352880dc60966b658d3ba05201cefbe6b08cf",
@@ -279,10 +278,9 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "boards/pico/src/components/e0470_page_turn/e0470_page_turn.c": {
-      "sha256": "fcc91f574f59abcceab2f879f3d8992eb306c251a0933a974438e579ba39c114",
-      "pull_request": 68,
-      "source_commit": "cd9f1a598a97a985bcda57dc47d49e118c4b1083",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "c1552226485aa2c93c7ded099e93635417948ccecbe58aef9ac1b063c05d5503",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "CMakeLists.txt": {
       "sha256": "5d7c26d4672a7761505eb2436669e4fc656aa389cba56a4595b2299de5b0acba",
@@ -321,9 +319,9 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "components/epdiy/src/highlevel.c": {
-      "sha256": "92c50435e721b7fb1cefb4566ac193409babe21f7a7542283fb1596e84ae42a1",
-      "user_decision": "用户2026-11-04要求从最新main创建feature分支修复Pico进度线闪黑，版本不变。仅Pico精确屏蔽局刷裁剪外像素并同步后缓冲范围，S31执行代码与原波形保持。 / User2026-11-04 requests the Pico progress-track fix on a feature branch from latest main without version changes. Exact Pico scan masks and back-buffer bounds only; S31 executable code and waveforms remain unchanged.",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "f4c800a37cf1d1a3553d5445cb679df05d7cbef9df22b2bee4564a546ca64eef",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "components/epdiy/LICENSE": {
       "sha256": "9d0c6c1bf7bf8f9587b6959c3bc7f9271f2abb9bf48be8e4e782baa06bb22648",
@@ -335,14 +333,14 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "main/display.h": {
-      "sha256": "b4447beb6264efc848dca18195e21855662672d57dfb7f852df93f0ae5c79701",
-      "user_decision": "2026-11-11",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "26faf13a1efb3c13afe5f7548c2befc52f96c9575e302ad7f2dd9b3046214398",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "boards/pico/src/main/display.c": {
-      "sha256": "908c0c245d9ebf262c63322b45201730fef246bf29eb4037f257759920b07c23",
-      "user_decision": "2026-11-11",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "fb1f4ccae407dfc92c969c60ae79d9c5d0d934e6a7b9f6b5c69b7eb37d753934",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "components/e0470_epaper_waveform/CMakeLists.txt": {
       "sha256": "595e9561dd93e7be298d3cd8372ae0e08024512bafd636513cc842fb105e5d1a",
@@ -350,14 +348,14 @@
       "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
     },
     "boards/pico/src/main/display_main_waveform.c": {
-      "sha256": "8ddf5c1dbe6574a30f79c006bdc481247787d50b9f3e72304db372bf991784fb",
-      "user_decision": "2026-11-11",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "0a445f1923f233ab3261a6a19313610af5372460aa2a6793f5a8c9d2e17ee306",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "main/display_main_waveform.h": {
-      "sha256": "91880ee7111db6182f353b243e98d16f095d8bbb9604a010b1d784233eef8604",
-      "user_decision": "2026-11-11",
-      "reason": "合并上游 main（官方 rc106 的同步源）带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 origin/main 完全相同，不含本 fork 的本地修改。Upstream main (the source the official rc106 was built from) changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to origin/main, so no fork-local edit is vouched for."
+      "sha256": "db427799d6b8e00600dd76a0c732817673c128a2140638f2348cc1acf122cee2",
+      "source_commit": "5a3a8a1cc347a43c44ff4d958b2fcb28e3ef8bb0",
+      "reason": "合并官方 rc107 基线带入该文件的官方更新，上游未刷新本夹具钉定值；按合入字节登记，已核对与 v0.3.3-rc107 完全相同，不含本 fork 的本地修改。Upstream v0.3.3-rc107 changed this file without refreshing the pin; recorded from the merged bytes, verified byte-identical to the tag, so no fork-local edit is vouched for."
     },
     "components/read_pico_pmu/CMakeLists.txt": {
       "sha256": "3e5542a8d6408cce9dfe6d268ad5f038c190b69a8b9e2147152c3f6bcb4aa937",
