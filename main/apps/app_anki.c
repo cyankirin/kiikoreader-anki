@@ -77,7 +77,7 @@ typedef struct {
     bool back_loaded;
     char front[ANKI_CARD_TEXT_MAX];
     char back[ANKI_CARD_TEXT_MAX];
-    // 折行结果：行号、高度、缩进与反色标记都归排版单元管。
+    // 折行结果：行号、高度、缩进与粗体标记都归排版单元管。
     // The wrapped lines: offsets, heights, indents and the emphasis flags
     // all belong to the layout unit.
     anki_layout_t layout;
@@ -713,25 +713,51 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
             }
             int y = UI_CONTENT_TOP + 8;
             char line[ANKI_LINE_BUF];
+            // 记住进页时的字重；粗体行临时切 700，绘制后立刻恢复，最后再
+            // 兜底恢复一次，绝不把字重泄漏到评分按钮或其它 app。
+            // Remember the weight on entry; bold lines switch to 700 and
+            // restore right after drawing, with one final restore so the
+            // grade buttons and other apps are never affected.
+            const int saved_weight = ttf_get_weight();
             for (int k = 0; k < count; ++k) {
                 const int i = first + k;
                 size_t n = SESS()->layout.line_len[i];
                 if (n >= sizeof(line)) n = sizeof(line) - 1;
                 memcpy(line, SESS()->layout.text + SESS()->layout.line_off[i], n);
                 line[n] = 0;
-                // 行首带 \x01 强调标记的行反色绘制（黑底白字），墨水屏上
-                // 清晰醒目；其余行常规黑字。行首缩进来自排版结果，选项续行
-                // 悬挂在前缀宽度下。/ Lines carrying the leading \x01 emphasis
-                // marker draw inverted (white on black) for clarity on
-                // e-paper; every other line draws ordinary black. The indent
-                // comes from the layout, so option continuations hang under
-                // their prefix.
+                // 带 \x01 标记的行（正确选项与答案）用黑色加粗；其余行常规
+                // 黑字。所有行都传 inverted=false，反色绘制已完全移除——
+                // 墨水屏看不到彩色，白字反色反而难读。行首缩进来自排版
+                // 结果，选项续行悬挂在前缀宽度下。
+                // Lines carrying the leading \x01 marker (correct options
+                // and the answer) draw black bold; every other line draws
+                // ordinary black. inverted=false everywhere: inverted
+                // drawing is gone, since e-paper has no colour and
+                // white-on-black is harder to read. The indent comes from
+                // the layout, so option continuations hang under their
+                // prefix.
                 if (n > 0) {
-                    ui_text_fixed(fb, UI_MARGIN + SESS()->layout.line_x[i], y, SESS()->layout.text_px, line,
-                                  EPD_DRAW_ALIGN_LEFT, SESS()->layout.line_invert[i]);
+                    const bool bold = SESS()->layout.line_bold[i];
+                    const int x = UI_MARGIN + SESS()->layout.line_x[i];
+                    const int px = SESS()->layout.text_px;
+                    if (bold) ttf_set_weight(ANKI_BOLD_WGHT);
+                    ui_text_fixed(fb, x, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+                    if (bold && ui_text_uses_builtin(line)) {
+                        // 内建位图字体没有 wght 轴：水平 1px 双描边模拟加粗。
+                        // 只叠加黑字（ui_text_fixed 不写背景），advance 不变，
+                        // 与排版层 seg_measure_px() 的 +1 宽度口径一致。
+                        // The built-in bitmap face has no wght axis: a 1px
+                        // horizontal double strike fakes bold. Only black ink
+                        // is overlaid (ui_text_fixed never paints a
+                        // background), the advance is unchanged, matching
+                        // the +1 width budget in seg_measure_px().
+                        ui_text_fixed(fb, x + 1, y, px, line, EPD_DRAW_ALIGN_LEFT, false);
+                    }
+                    if (bold) ttf_set_weight(saved_weight);
                 }
                 y += SESS()->layout.line_height[i];
             }
+            ttf_set_weight(saved_weight);
             if (SESS()->layout.line_count == 0) {
                 ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 8, UI_PX_BODY, "[空卡片]",
                         EPD_DRAW_ALIGN_LEFT, false);

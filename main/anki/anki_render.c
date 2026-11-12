@@ -1,15 +1,16 @@
 /* SPDX-License-Identifier: LicenseRef-Kiikoread-Personal-Study-1.0
  * 中文：模板渲染实现。有界输出构建器 + 字段查找 + 条件段 + cloze 处理，
  *       最后复用 html_to_blocks 得到块文本；选择题模型另走专用版面
- *       （正面：元信息 / 【题型】题干 / 选项带字母；背面再加错项 \x01、
- *       答案与备注），模板里只写在属性上的字母与隐藏占位条目不进正文。
+ *       （正面：元信息 / 【题型】题干 / 选项带字母；背面在正确项与答案行
+ *       加 \x01 粗体标记，全部行仍为黑字），模板里只写在属性上的字母与
+ *       隐藏占位条目不进正文。
  * English: Template rendering. Bounded output builder, field lookup,
  *          conditional sections and cloze handling, then html_to_blocks for
  *          block text; choice models take dedicated layouts (front: meta line,
- *          【type】question, lettered options; back: the same plus \x01 on
- *          wrong options, the answer and the note), and letters that only
- *          lived in template attributes or hidden placeholders never reach the
- *          text.
+ *          【type】question, lettered options; back: the same plus the \x01
+ *          bold marker on correct options and the answer line, with every
+ *          line still in black ink), and letters that only lived in template
+ *          attributes or hidden placeholders never reach the text.
  */
 #include "anki_render.h"
 
@@ -641,17 +642,20 @@ static esp_err_t render_choice_front(const anki_collection_t* col, const anki_ca
 
 /// 选择题背面：不走通用 HTML 模板路径，直接按字段拼装纯文本（行 = '\n'
 /// 分隔）：第 1 行题干；空行分层；每个选项一行 `<字母>. <选项纯文本>`，
-/// 错误选项行首加强调标记 \x01（正确项保持常规黑字，答案陈述也常规）；
-/// 空行分层后是一行 `答案：<T 的原值>`；注释字段非空时追加 `备注：<N>`。
-/// 输出受出参容量约束，超长截断并保证 NUL 结尾。
+/// 正确选项行首加 \x01 粗体标记（错误项保持常规黑字）；空行分层后是一行
+/// 带 \x01 的 `答案：<T 的原值>`；注释字段非空时追加 `备注：<N>`。
+/// 所有行一律黑字，只有带标记的行由排版层加粗显示——墨水屏看不到彩色，
+/// 也不再用反色（黑底白字）突出答案。输出受出参容量约束，超长截断并
+/// 保证 NUL 结尾。
 /// Choice back: bypass the generic HTML template path and assemble plain
 /// text from fields (lines separated by '\n'): the question first; a blank
 /// line for hierarchy; one line per option as `<letter>. <option text>` with
-/// the \x01 emphasis marker on wrong options (correct options keep ordinary
-/// black ink and so does the answer statement); another blank line; one line
-/// `答案：<raw T>`; and `备注：<N>` when the note field is non-empty. Output
-/// respects the caller's cap: overflow truncates and the result stays
-/// NUL-terminated.
+/// the \x01 bold marker on correct options (wrong ones keep ordinary black
+/// ink); another blank line; a `\x01答案：<raw T>` line; and `备注：<N>`
+/// when the note field is non-empty. Every line stays black; only marked
+/// lines are drawn bold by the layout, because e-paper shows no colour and
+/// the old inverted (white-on-black) emphasis is gone. Output respects the
+/// caller's cap: overflow truncates and the result stays NUL-terminated.
 static esp_err_t render_choice_back(const anki_collection_t* col, const anki_card_t* card,
                                     const choice_layout_t* layout, char* out, size_t cap) {
     const anki_note_t* note = view_note(col, card->nid);
@@ -687,8 +691,8 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     // comes from spacing, not from a smaller size.
     put_trunc(&b, "\n\n", 2);
 
-    // 选项行：`<字母>. <选项纯文本>`，错误选项行首加 \x01。
-    // Option lines: `<letter>. <option text>`, wrong ones prefixed with \x01.
+    // 选项行：`<字母>. <选项纯文本>`，正确选项行首加 \x01 粗体标记。
+    // Option lines: `<letter>. <option text>`, correct ones prefixed with \x01.
     for (int i = 0; i < layout->option_count; ++i) {
         size_t opt_len = 0;
         const char* opt = ctx_field(&rc, layout->option_field[i], &opt_len);
@@ -699,12 +703,12 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
                 correct = true;
             }
         }
-        // 强调标记落在错误选项上：正确项与答案陈述保持常规黑字，墨水屏上
-        // 白字反色看不清，错的才需要被抹掉。
-        // The emphasis marker lands on wrong options: correct ones and the
-        // answer statement keep ordinary black ink, since inverted white on
-        // e-paper is hard to read and only the wrong ones need muting.
-        if (!correct) put_trunc(&b, "\x01", 1);
+        // 粗体标记落在正确选项与答案陈述上：全部行仍为黑字，只有带标记
+        // 的行由排版层加粗。墨水屏看不到彩色，也不再用反色（黑底白字）。
+        // The bold marker lands on correct options and the answer statement:
+        // all lines stay black and only marked lines are drawn bold, since
+        // e-paper shows no colour and inverted white-on-black is gone.
+        if (correct) put_trunc(&b, "\x01", 1);
         char head[3] = {layout->option_letter[i], '.', ' '};
         put_trunc(&b, head, sizeof(head));
         put_field_text(&b, buf, opt, opt_len);
@@ -714,7 +718,9 @@ static esp_err_t render_choice_back(const anki_collection_t* col, const anki_car
     // 选项与答案之间同样留一空行。/ One blank line separates options from the answer.
     put_trunc(&b, "\n", 1);
 
-    // 答案行：陈述本身不加强调标记。/ Answer line: the statement carries no marker.
+    // 答案行：行首加 \x01 粗体标记，与正确选项同样黑色加粗显示。
+    // Answer line: prefix \x01 so it draws black bold like the correct options.
+    put_trunc(&b, "\x01", 1);
     put_trunc(&b, "答案：", strlen("答案："));
     put_field_text(&b, buf, answer, answer_len);
     put_trunc(&b, "\n", 1);
@@ -798,10 +804,11 @@ esp_err_t anki_render_front(const anki_collection_t* col, const anki_card_t* car
 esp_err_t anki_render_back(const anki_collection_t* col, const anki_card_t* card,
                            const char* front_text, char* out, size_t cap) {
     if (!col || !card || !out || cap == 0) return ESP_ERR_INVALID_ARG;
-    // 选择题模型走专用版面：错误选项行加 \x01 强调标记（正面与此无关，
-    // anki_render_front 不产生任何 \x01）。
-    // Choice models take the dedicated layout: wrong option lines carry the
-    // \x01 emphasis marker (the front is untouched and never emits \x01).
+    // 选择题模型走专用版面：正确选项行与答案行加 \x01 粗体标记（正面
+    // 与此无关，anki_render_front 不产生任何 \x01）。错误选项保持常规黑字。
+    // Choice models take the dedicated layout: correct option lines and the
+    // answer line carry the \x01 bold marker (the front is untouched and
+    // never emits \x01). Wrong options keep ordinary black ink.
     choice_layout_t layout;
     if (choice_layout(col, card, &layout)) {
         return render_choice_back(col, card, &layout, out, cap);

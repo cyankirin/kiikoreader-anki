@@ -441,13 +441,15 @@ static void test_render(void) {
     anki_apkg_free(&imp);
 }
 
-// 选择题版面：正面与背面同构。正面 = 元信息行（模板里的 I / J / P）+ 
-// `【题型】题干` + 空行 + 字母选项；背面再加错项反色标记、答案与备注。
-// 模板里只写在 id 属性上的字母与 `<li class="hidden">placeholder</li>` 都不进正文。
+// 选择题版面：正面与背面同构。正面 = 元信息行（模板里的 I / J / P）+
+// `【题型】题干` + 空行 + 字母选项；背面在正确项与答案行加 \x01 粗体
+// 标记（全部行仍为黑字），再加备注。模板里只写在 id 属性上的字母与
+// `<li class="hidden">placeholder</li>` 都不进正文。
 // Choice layout: the front mirrors the back. Front = the meta line (I / J / P
 // from the template) plus `【type】question`, a blank line and lettered
-// options; the back adds the inverted wrong options, the answer and the note.
-// Letters that only lived in id attributes and hidden placeholder items
+// options; the back adds the \x01 bold marker to correct options and the
+// answer line (all lines stay black), then the note. Letters that only lived
+// in id attributes and hidden placeholder items
 // (`<li class="hidden">placeholder</li>`) never reach the text.
 static void test_choice_render(void) {
     printf("== choice render ==\n");
@@ -457,9 +459,11 @@ static void test_choice_render(void) {
     anki_collection_from_import(&imp, &col);
     static char front[ANKI_CARD_TEXT_MAX], back[ANKI_CARD_TEXT_MAX];
     if (imp.card_count == 2) {
-        // 单选卡：T="A"，正面四个选项带字母，错误项 B/C/D 在背面反色。
+        // 单选卡：T="A"，正面四个选项带字母，背面正确项 A 与答案行加粗，
+        // 错误项 B/C/D 保持常规黑字。
         // Single-choice card: T="A"; the front carries lettered options and
-        // the wrong ones B/C/D are inverted on the back.
+        // on the back the correct A and the answer line draw bold while
+        // B/C/D stay ordinary black.
         CHECK(anki_render_front(&col, &imp.cards[0], front, sizeof(front)) == ESP_OK);
         CHECK(strcmp(front,
                      "MC1-0001 / LY0001 / 1.1.1\n"
@@ -470,7 +474,7 @@ static void test_choice_render(void) {
                      "C. 国家体育管理机构和地方体育管理机构\n"
                      "D. 国家和地方公安部门\n") == 0);
         CHECK(strstr(front, "placeholder") == NULL);  // 隐藏占位条目不泄漏 / no placeholder leak
-        CHECK(strstr(front, "\x01") == NULL);         // 正面无强调标记 / no marker on the front
+        CHECK(strstr(front, "\x01") == NULL);         // 正面无粗体标记 / no bold marker on the front
         CHECK(strstr(front, "【单选】") != NULL);       // 题型前缀 / type prefix
         CHECK(strstr(front, "\nA. ") != NULL);
         CHECK(strstr(front, "\nB. ") != NULL);
@@ -478,37 +482,38 @@ static void test_choice_render(void) {
         CHECK(strstr(front, "\nD. ") != NULL);
 
         CHECK(anki_render_back(&col, &imp.cards[0], front, back, sizeof(back)) == ESP_OK);
-        // 整篇背面逐行钉死：题干（带题型前缀）、空行、选项（错误项行首带
-        // \x01）、空行、答案行（不带标记），注释为空故无备注行。
+        // 整篇背面逐行钉死：题干（带题型前缀）、空行、选项（正确项行首带
+        // \x01 粗体标记，错误项常规）、空行、答案行（带 \x01 粗体标记），
+        // 注释为空故无备注行。所有行一律黑字，只有带标记的行加粗。
         // The whole back is pinned line by line: the question with the type
-        // prefix, a blank line, options (wrong ones lead with \x01), a blank
-        // line and the answer (no marker); the empty note means no note line.
+        // prefix, a blank line, options (correct ones lead with the \x01 bold
+        // marker, wrong ones stay plain), a blank line and the answer, also
+        // carrying \x01. Every line is black; only marked lines draw bold.
         CHECK(strcmp(back,
                      "【单选】我国依法负责对业余无线电台实施监督管理的机构是：\n"
                      "\n"
+                     "\x01"
                      "A. 国家无线电管理机构和省、自治区、直辖市无线电管理机构\n"
-                     "\x01"
                      "B. 在国家或地方民政部门注册的业余无线电协会\n"
-                     "\x01"
                      "C. 国家体育管理机构和地方体育管理机构\n"
-                     "\x01"
                      "D. 国家和地方公安部门\n"
                      "\n"
+                     "\x01"
                      "答案：A\n") == 0);
-        CHECK(strstr(back, "\nA. ") != NULL);        // 正确项常规 / correct option plain
-        CHECK(strstr(back, "\n\x01" "A. ") == NULL);  // 正确项不反色 / not inverted
-        CHECK(strstr(back, "\n\x01" "B. ") != NULL);  // 错误项反色 / wrong option inverted
-        CHECK(strstr(back, "\n\x01" "C. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "D. ") != NULL);
-        CHECK(strstr(back, "\n答案：A") != NULL);      // 答案行常规 / answer line plain
-        CHECK(strstr(back, "\n\x01" "答案") == NULL);  // 答案行不反色 / answer not inverted
-        CHECK(strstr(back, "：\n\nA. ") != NULL);      // 题干后有空行 / blank line after question
-        CHECK(strstr(back, "门\n\n答案：A") != NULL);  // 选项后有空行 / blank line after options
-        CHECK(strstr(back, "备注：") == NULL);          // 注释为空无备注行 / no note line
+        CHECK(strstr(back, "\n\x01" "A. ") != NULL);       // 正确项加粗 / correct option bold
+        CHECK(strstr(back, "\n\x01" "B. ") == NULL);       // 错误项不加粗 / wrong option not bold
+        CHECK(strstr(back, "\nB. ") != NULL);               // 错误项常规黑字 / wrong option plain
+        CHECK(strstr(back, "\n\x01" "C. ") == NULL);
+        CHECK(strstr(back, "\n\x01" "D. ") == NULL);
+        CHECK(strstr(back, "\n\x01" "答案") != NULL);       // 答案行加粗 / answer line bold
+        CHECK(strstr(back, "\n答案：A") == NULL);           // 答案行无常规副本 / no plain answer
+        CHECK(strstr(back, "：\n\n\x01" "A. ") != NULL);    // 题干后有空行 / blank line after question
+        CHECK(strstr(back, "门\n\n\x01" "答案：A") != NULL); // 选项后有空行 / blank line after options
+        CHECK(strstr(back, "备注：") == NULL);               // 注释为空无备注行 / no note line
 
-        // 多选卡：T="AC"，正面/背面第 1 行都是【多选】，A/C 常规，B/D 反色。
+        // 多选卡：T="AC"，正面/背面第 1 行都是【多选】，A/C 加粗，B/D 常规黑字。
         // Multiple-choice card: T="AC"; both first lines read 【多选】, A and C
-        // stay plain while B and D are inverted.
+        // draw bold while B and D stay ordinary black.
         CHECK(anki_render_front(&col, &imp.cards[1], front, sizeof(front)) == ESP_OK);
         CHECK(strcmp(front,
                      "MC2-0002 / LY0002 / 1.1.1\n"
@@ -526,29 +531,30 @@ static void test_choice_render(void) {
         CHECK(strcmp(back,
                      "【多选】我国专门针对无线电管理的行政法规及其制定机构是：\n"
                      "\n"
+                     "\x01"
                      "A. 《中华人民共和国无线电管理条例》\n"
-                     "\x01"
                      "B. 《中华人民共和国无线电管理办法》\n"
-                     "C. 国务院和中央军委\n"
                      "\x01"
+                     "C. 国务院和中央军委\n"
                      "D. 工业和信息化部\n"
                      "\n"
+                     "\x01"
                      "答案：AC\n"
                      "备注：参见《条例》第一章\n") == 0);
-        CHECK(strstr(back, "\nA. ") != NULL);
-        CHECK(strstr(back, "\nC. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "A. ") == NULL);
-        CHECK(strstr(back, "\n\x01" "C. ") == NULL);
-        CHECK(strstr(back, "\n\x01" "B. ") != NULL);
-        CHECK(strstr(back, "\n\x01" "D. ") != NULL);
-        CHECK(strstr(back, "\n答案：AC") != NULL);
-        CHECK(strstr(back, "\n\x01" "答案") == NULL);
+        CHECK(strstr(back, "\n\x01" "A. ") != NULL);    // 正确项 A 加粗 / correct A bold
+        CHECK(strstr(back, "\n\x01" "C. ") != NULL);    // 正确项 C 加粗 / correct C bold
+        CHECK(strstr(back, "\n\x01" "B. ") == NULL);    // 错误项 B 不加粗 / wrong B plain
+        CHECK(strstr(back, "\n\x01" "D. ") == NULL);    // 错误项 D 不加粗 / wrong D plain
+        CHECK(strstr(back, "\nB. ") != NULL);
+        CHECK(strstr(back, "\nD. ") != NULL);
+        CHECK(strstr(back, "\n\x01" "答案") != NULL);   // 答案行加粗 / answer line bold
+        CHECK(strstr(back, "\n答案：AC") == NULL);      // 答案行无常规副本 / no plain answer
         CHECK(strstr(back, "\n备注：参见《条例》第一章") != NULL);
     }
     anki_apkg_free(&imp);
 
-    // 回归保护：普通（非选择题）夹具正面与背面都不含强调标记，也不加题型前缀。
-    // Regression guard: an ordinary (non-choice) fixture carries no emphasis
+    // 回归保护：普通（非选择题）夹具正面与背面都不含粗体标记，也不加题型前缀。
+    // Regression guard: an ordinary (non-choice) fixture carries no bold
     // marker on either side and gets no type prefix.
     imp = (anki_import_t){0};
     CHECK(anki_apkg_import(FIX "/basic-v2.apkg", &imp) == ESP_OK);
