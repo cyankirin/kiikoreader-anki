@@ -29,6 +29,8 @@
  * User rollback: all main modes return to one discrete list step per gesture with differential updates, without inertia, light motion ink or idle restoration.
  * 用户2026-11-07同步S31列表交互：滑动临时黑白缓存，连续按住跟手，停稳800ms后原Pico擦白恢复灰阶。
  * User revision2026-11-07: sync S31 cached BW list motion/held dragging and800ms idle white/gray recovery, using Pico FOLLOW8 and its own original gray profile.
+ * 用户修订：Pico 设置列表松手直接用灰阶清残影并画最终位置，不等待空闲。
+ * User revision: on lift, clean the Pico settings list and draw its final position in one gray update.
  * 用户2026-10-21修订：设置列表滚动保留文字抗锯齿和灰阶头像，撤掉书架额外四相补白，列表仍一次输出且不影响固定底栏。
  * User revision2026-10-21: keep AA text and gray avatars during list scrolls, omit the shelf's four added white phases, and retain one output with fixed navigation.
  */
@@ -168,9 +170,6 @@ static app_redraw_t pin_setup_tick(app_ctx_t *ctx) {
     return pin_paint(ctx, (EpdRect){122, 218, 440, 247});
 }
 static int s_style_scroll, s_main_scroll;
-// 中文：二级分组页码。-1 = 索引页（只列分组），0..3 = 只显示该组的行，两级都是单屏、不需要滚动。
-// / Two-level grouping: -1 lists the groups, 0..3 shows one group. Both fit one screen, so no scrolling.
-static int s_main_group = -1;
 // 新样式使用新编号；旧3/4仍退回亚克力，列表保持5。
 // New style gets a new ID; retired3/4 still fall back to acrylic and list remains5.
 static const uint8_t s_shelf_style_ids[] = {1, 2, 6, 5};
@@ -180,21 +179,24 @@ static bool s_scroll_drag_consumed, s_scroll_present_pending;
 typedef struct {
     bool tracking, active, following, disabled, frame_pending, settle_pending;
     settings_page_t page;
-    int *offset, limit, origin_offset, origin_y, press_x, press_y, shown_offset;
+    int *offset, limit, origin_offset, origin_y, press_offset, press_x, press_y, shown_offset;
     int width, height, travel_x, travel_y;
+    int quick_direction;
     enum EpdRotation rotation;
-    int64_t frame_ms, settle_ms, press_ms, sample_ms, blocked_ms;
+    int64_t frame_ms, press_ms, sample_ms;
+    int64_t quick_release_ms;
     EpdRect area;
     uint8_t *bits;
 } settings_drag_t;
 static settings_drag_t s_list_drag;
 #define SETTINGS_DRAG_SLOP_PX 12
-#define SETTINGS_QUICK_MIN_PX 36
+#define SETTINGS_QUICK_MIN_PX 6
 #define SETTINGS_QUICK_MAX_PX SETTINGS_QUICK_STEP_PX
 #define SETTINGS_QUICK_MS 300
+#define SETTINGS_SHORT_QUICK_MS 150
+#define SETTINGS_QUICK_REPEAT_MS 650
 #define SETTINGS_QUICK_STEP_PX ((settings_content_end()-(s_page==SETTINGS_MAIN?160:190))/2)
 #define SETTINGS_HOLD_FRAME_MS 60
-#define SETTINGS_HOLD_IDLE_MS 800
 #define SETTINGS_HOLD_CACHE_MAX (512u * 1024u)
 // 蓝牙翻页器子页：滚动位置、正在学习哪个动作（0 未学，1 上一页，2 下一页）、提示行。
 // Bluetooth sub-page: scroll offset, which action is being learned (0 idle, 1 prev, 2 next),
@@ -476,21 +478,6 @@ static int settings_main_row_height(void) {
 // with 8 px to spare.
 #define SETTINGS_SCROLL_MAX \
     (SETTINGS_MAINTENANCE_Y + SETTINGS_MAINTENANCE_ROWS * SETTINGS_ROW_H - UI_NAV_REFRESH_END + 12)
-#define SETTINGS_GROUP_COUNT 4
-// 索引页与二级页共用同一个起始基线，行高沿用 SETTINGS_ROW_H。
-// The index and the group pages share one top baseline and the row height.
-// 索引页从原第一个分组的基线开始，避开上方头像卡片。
-// The index starts where the first group used to, clear of the profile card.
-#define SETTINGS_INDEX_Y SETTINGS_WIRELESS_Y
-#define SETTINGS_GROUP_TOP 236
-static int settings_group_y(int g) {
-    switch (g) {
-        case 0: return SETTINGS_WIRELESS_Y;
-        case 1: return SETTINGS_DISPLAY_Y;
-        case 2: return SETTINGS_PERSONAL_Y;
-        default: return SETTINGS_MAINTENANCE_Y;
-    }
-}
 static char s_editor[96], s_editor_notice[80];
 static ui_text_edit_t s_editor_input;
 static bool s_editor_signature;
@@ -1596,7 +1583,7 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         return;
     }
     const int profile_y=180-s_main_scroll, profile_h=settings_profile_height();
-    if (s_main_group < 0 && profile_y+profile_h>160) {
+    if (profile_y+profile_h>160) {
         settings_card(fb,(EpdRect){36,profile_y,612,profile_h},24,UI_GRAY_WHITE,0x70);
         int avatar_y=profile_y+(profile_h-82)/2;
         bool avatar_ok=s_avatar_ready;
@@ -1618,6 +1605,8 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
     const char *connection_labels[]={"WiFi","蓝牙翻页器","日期与时间"};
     const char *connection_values[]={wifi,app_settings_ble_turner()?"已开启":"已关闭","设置"};
     const int connection_icons[]={0,1,6};
+    setting_group(fb,SETTINGS_WIRELESS_Y-49,"连接与时间",SETTINGS_WIRELESS_Y,
+                  connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
     char font_name[96],contrast[24],idle[24],signature[96];
     snprintf(font_name,sizeof(font_name),"%s · %u%%",system_font_label(app_settings_system_font_path()),app_settings_system_font_size());
     snprintf(contrast,sizeof(contrast),"%u%%",app_settings_system_contrast());
@@ -1628,42 +1617,21 @@ static void render_content(app_ctx_t *ctx, uint8_t *fb) {
         app_settings_main_refresh_mode()==APP_MAIN_REFRESH_FAST?"快刷":app_settings_main_refresh_mode()==APP_MAIN_REFRESH_WATER?"水波纹":"普通",
         app_settings_home_full_refresh()?"开启":"关闭",idle,"",app_settings_staged_shutdown()?"先浅后深":"彻底断电",app_setup_english()?"English":"简体中文"};
     const int display_icons[]={2,7,15,11,14,SETTINGS_UNLOCK_ICON,9,2};
+    setting_group(fb,SETTINGS_DISPLAY_Y-49,"显示",SETTINGS_DISPLAY_Y,
+                  display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
     snprintf(signature,sizeof(signature),"%s",app_settings_status_signature()[0]?app_settings_status_signature():"未设置");
     const char *personal_labels[]={"书架样式","书籍百分比显示","锁屏样式","锁屏密码","状态栏签名"};
     const char *personal_values[]={app_settings_shelf_style()==5?"列表书架":app_settings_shelf_style()==6?"液态玻璃书架":app_settings_shelf_style()==1?"深色书轨":"亚克力书架","",
         app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":app_settings_lock_style()==1?"壁纸":"阅读票根",
         lock_pin_enabled()?"已开启":"已关闭",signature};
     const int personal_icons[]={4,20,5,16,10};
+    setting_group(fb,SETTINGS_PERSONAL_Y-49,"个性化功能",SETTINGS_PERSONAL_Y,
+                  personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
     const char *maintenance_labels[]={"系统升级","保存与恢复","屏幕修复","BOOT 刷机","恢复出厂设置"};
     const char *maintenance_values[]={"OTA / TF 卡","配置","清除条纹","电脑刷机","重置系统"};
     const int maintenance_icons[]={12,8,17,13,11};
-    if (s_main_group < 0) {
-        // 索引页：只列分组，各自带上当前取值；具体行在下一级。
-        // Index page: one entry per group with its current value; rows live one level down.
-        char index_wireless[64], index_display[64], index_personal[64];
-        snprintf(index_wireless,sizeof(index_wireless),"%s",wifi);
-        snprintf(index_display,sizeof(index_display),"%s",font_name);
-        snprintf(index_personal,sizeof(index_personal),"%s",
-                 app_settings_lock_style()==3?"透明书封":app_settings_lock_style()==2?"书架拼贴":
-                 app_settings_lock_style()==1?"壁纸":"阅读票根");
-        const char *index_labels[]={"连接与时间","显示","个性化功能","升级和恢复"};
-        const char *index_values[]={index_wireless,index_display,index_personal,"OTA / TF 卡"};
-        const int index_icons[]={0,2,4,12};
-        setting_group(fb,SETTINGS_INDEX_Y-49,"设置",SETTINGS_INDEX_Y,
-                      index_icons,index_labels,index_values,SETTINGS_GROUP_COUNT);
-    } else if (s_main_group == 0) {
-        setting_group(fb,SETTINGS_GROUP_TOP-49,"连接与时间",SETTINGS_GROUP_TOP,
-                      connection_icons,connection_labels,connection_values,SETTINGS_WIRELESS_ROWS);
-    } else if (s_main_group == 1) {
-        setting_group(fb,SETTINGS_GROUP_TOP-49,"显示",SETTINGS_GROUP_TOP,
-                      display_icons,display_labels,display_values,SETTINGS_DISPLAY_ROWS);
-    } else if (s_main_group == 2) {
-        setting_group(fb,SETTINGS_GROUP_TOP-49,"个性化功能",SETTINGS_GROUP_TOP,
-                      personal_icons,personal_labels,personal_values,SETTINGS_PERSONAL_ROWS);
-    } else {
-        setting_group(fb,SETTINGS_GROUP_TOP-49,"升级和恢复",SETTINGS_GROUP_TOP,
-                      maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
-    }
+    setting_group(fb,SETTINGS_MAINTENANCE_Y-49,"升级和恢复",SETTINGS_MAINTENANCE_Y,
+                  maintenance_icons,maintenance_labels,maintenance_values,SETTINGS_MAINTENANCE_ROWS);
     // 主列表也要有一行提示位：确认、修复结果都写在这里，不然点了没有任何回音。
     // The main list needs a notice line too: confirmation and the repair result land here, or a tap
     // would have no answer at all.
@@ -1854,29 +1822,38 @@ static void settings_drag_blit(app_ctx_t *ctx) {
     }
 }
 
-static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y) {
+static bool settings_drag_repeated(const settings_drag_t *drag,int dy) {
+    return dy && drag->quick_direction == (dy < 0 ? 1 : -1) &&
+        drag->press_ms >= drag->quick_release_ms &&
+        drag->press_ms-drag->quick_release_ms <= SETTINGS_QUICK_REPEAT_MS;
+}
+
+static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y,bool lifting) {
     settings_drag_t *drag=&s_list_drag;
     if(!drag->tracking)return APP_REDRAW_NONE;
     if(ctx->now_ms<drag->sample_ms)return APP_REDRAW_NONE;
     drag->sample_ms=ctx->now_ms;
-    int ax=abs(x-drag->press_x),ay=abs(y-drag->press_y);
+    int dy=y-drag->press_y;
+    int ax=abs(x-drag->press_x),ay=abs(dy);
     if(ax>drag->travel_x)drag->travel_x=ax;
     if(ay>drag->travel_y)drag->travel_y=ay;
-    if(drag->disabled)return APP_REDRAW_NONE;
+    // 快滑判定期间只记录坐标，松手前不推中间帧。
+    // Record motion without painting while the contact can still be a quick flick.
+    if(drag->disabled||ctx->now_ms-drag->press_ms<=SETTINGS_QUICK_MS)return APP_REDRAW_NONE;
     int next=drag->origin_offset+drag->origin_y-y;
     if(next<0)next=0;
     if(next>drag->limit)next=drag->limit;
     if(!drag->following) {
-        int dy=y-drag->press_y;
         if(abs(dy)<SETTINGS_DRAG_SLOP_PX||abs(dy)<=abs(x-drag->press_x)||
            next==*drag->offset)return APP_REDRAW_NONE;
-        if(!drag->active) {
+        if(!lifting&&!drag->active) {
             if(!settings_drag_cache(ctx)){drag->disabled=true;return APP_REDRAW_NONE;}
             drag->active=true;drag->shown_offset=-1;
         }
         drag->following=true;
     }
     *drag->offset=next;
+    if(lifting)return APP_REDRAW_NONE;
     if(next==drag->shown_offset||
        (drag->shown_offset>=0&&ctx->now_ms-drag->frame_ms<SETTINGS_HOLD_FRAME_MS))return APP_REDRAW_NONE;
     drag->frame_pending=true;
@@ -1884,13 +1861,14 @@ static app_redraw_t settings_drag_sample(app_ctx_t *ctx,int x,int y) {
 }
 
 static app_redraw_t settings_drag_finish(app_ctx_t *ctx) {
-    s_list_drag.tracking=false;
-    if(!s_list_drag.active){s_list_drag.following=false;return APP_REDRAW_NONE;}
-    s_list_drag.following=false;
-    s_list_drag.frame_pending=*s_list_drag.offset!=s_list_drag.shown_offset;
-    s_list_drag.settle_pending=true;
-    s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
-    return s_list_drag.frame_pending?APP_REDRAW_AREA:APP_REDRAW_NONE;
+    settings_drag_t *drag=&s_list_drag;
+    if(drag->tracking&&(drag->active||*drag->offset!=drag->press_offset))
+        drag->settle_pending=true;
+    drag->tracking=false;
+    drag->following=false;
+    drag->frame_pending=false;
+    return drag->settle_pending&&!(ctx->touch&&ctx->touch->touched)&&!ctx->consumed
+        ?APP_REDRAW_AREA:APP_REDRAW_NONE;
 }
 
 static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
@@ -1899,53 +1877,62 @@ static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
     if(ev->type==UI_GESTURE_PRESS) {
         const int top=s_page==SETTINGS_MAIN?160:190;
         if(settings_plain_list()&&limit>0&&ev->y0>=top&&ev->y0<settings_content_end()) {
-            if(!s_list_drag.bits||s_list_drag.page!=s_page||s_list_drag.offset!=offset||s_list_drag.limit!=limit)
+            if(s_list_drag.page!=s_page||s_list_drag.offset!=offset||s_list_drag.limit!=limit)
                 settings_drag_reset();
-            s_list_drag.tracking=true;s_list_drag.following=false;s_list_drag.settle_pending=false;
+            if(!s_list_drag.bits)s_list_drag.disabled=false;
+            s_list_drag.tracking=true;s_list_drag.following=false;
             s_list_drag.page=s_page;s_list_drag.offset=offset;s_list_drag.limit=limit;
-            s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y0;
+            s_list_drag.press_offset=s_list_drag.origin_offset=*offset;s_list_drag.origin_y=ev->y0;
             s_list_drag.press_x=ev->x0;s_list_drag.press_y=ev->y0;
-            s_list_drag.press_ms=ctx->now_ms;s_list_drag.blocked_ms=0;s_list_drag.travel_x=s_list_drag.travel_y=0;
+            s_list_drag.press_ms=ctx->now_ms;s_list_drag.travel_x=s_list_drag.travel_y=0;
             s_list_drag.sample_ms=ctx->now_ms;
             s_list_drag.area=(EpdRect){0,top,UI_LOCK_WIDTH,settings_content_end()-top};
-        } else if(s_list_drag.active) {
-            // 标题轻触也打断空闲计时；离页由生命周期释放，不能在新接触下补刷。
-            // Chrome contact also defers settling; lifecycle owns exits, never repaint beneath new input.
-            s_list_drag.settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
+        } else if(s_list_drag.settle_pending) {
+            s_list_drag.quick_direction=0;
         } else {
             settings_drag_reset();
         }
         return false;
     }
-    if(!s_list_drag.tracking&&!s_list_drag.active)return false;
+    if(!s_list_drag.tracking)return false;
     if(s_list_drag.page!=s_page){settings_drag_reset();return false;}
     if(ev->type!=UI_GESTURE_MOVE&&ev->type!=UI_GESTURE_LONG_PRESS) {
-        bool owned=s_list_drag.following;
         const bool lift=s_list_drag.tracking&&ctx->released&&ctx->touch&&
             !ctx->touch->touched&&!ctx->touch->count&&!ctx->consumed&&
             ctx->now_ms>=s_list_drag.sample_ms;
-        if(owned&&lift)
-            (void)settings_drag_sample(ctx,ev->x,ev->y);
-        const int dy=(int)ev->y-s_list_drag.press_y,dx=(int)ev->x-s_list_drag.press_x;
-        // 快滑只在有效松手时补足固定段，以按下位置为锚；取消/长拖和轻微抖动不加速。
-        // Complete a short flick only on a valid lift, anchored at press; invalid cancellation, long drags and jitter never accelerate.
-        if(lift&&!s_list_drag.disabled&&ctx->now_ms-s_list_drag.press_ms-s_list_drag.blocked_ms<=SETTINGS_QUICK_MS&&
-           abs(dy)>=SETTINGS_QUICK_MIN_PX&&abs(dy)<=SETTINGS_QUICK_MAX_PX&&abs(dy)>abs(dx)&&
-           s_list_drag.travel_y<=SETTINGS_QUICK_MAX_PX&&s_list_drag.travel_x<abs(dy)) {
-            int next=s_list_drag.origin_offset+(dy<0?SETTINGS_QUICK_STEP_PX:-SETTINGS_QUICK_STEP_PX);
+        if(lift)
+            (void)settings_drag_sample(ctx,ev->x,ev->y,true);
+        bool owned=s_list_drag.following;
+        const int dy=(int)ev->y-s_list_drag.press_y,dx=abs((int)ev->x-s_list_drag.press_x);
+        const int distance=abs(dy);
+        const int horizontal=dx>s_list_drag.travel_x?dx:s_list_drag.travel_x;
+        const int64_t elapsed=ctx->now_ms-s_list_drag.press_ms;
+        const bool repeated=settings_drag_repeated(&s_list_drag,dy);
+        // 未达到跟手门槛的快滑也能翻半屏，但要求更短的接触和明确的纵向位移。
+        // Flicks below the drag threshold still step half a viewport on lift if brief and clearly vertical.
+        const bool short_flick=elapsed<=SETTINGS_SHORT_QUICK_MS&&distance>2*horizontal;
+        s_list_drag.quick_direction=0;
+        if(lift&&elapsed<=SETTINGS_QUICK_MS&&distance>=SETTINGS_QUICK_MIN_PX&&distance>horizontal&&
+           (distance>=SETTINGS_DRAG_SLOP_PX||short_flick)&&
+           (repeated||(distance<=SETTINGS_QUICK_MAX_PX&&s_list_drag.travel_y<=SETTINGS_QUICK_MAX_PX))) {
+            int next=s_list_drag.press_offset+(dy<0?SETTINGS_QUICK_STEP_PX:-SETTINGS_QUICK_STEP_PX);
             if(next<0)next=0;
             if(next>s_list_drag.limit)next=s_list_drag.limit;
-            if(next==*offset||s_list_drag.active||settings_drag_cache(ctx)) {
-                if(next!=*offset&&!s_list_drag.active) {
-                    s_list_drag.active=true;s_list_drag.shown_offset=-1;
-                }
-                *offset=next;owned=true;
-            } else s_list_drag.disabled=true;
+            *offset=next;
+            s_list_drag.quick_direction=dy<0?1:-1;
+            s_list_drag.quick_release_ms=ctx->now_ms;
+            s_scroll_drag_consumed=false;
+            owned=true;
         }
         *redraw=settings_drag_finish(ctx);
-        return owned;
+        return owned||*redraw!=APP_REDRAW_NONE;
     }
-    if(ev->type==UI_GESTURE_MOVE)*redraw=settings_drag_sample(ctx,ev->x,ev->y);
+    if(ev->type==UI_GESTURE_MOVE) {
+        *redraw=settings_drag_sample(ctx,ev->x,ev->y,false);
+        // 快滑期间也接管 MOVE，避免离散滚动兜底提前移动列表。
+        // Own MOVE during flick detection so the discrete fallback cannot move the list early.
+        return s_list_drag.following||ctx->now_ms-s_list_drag.press_ms<=SETTINGS_QUICK_MS;
+    }
     return s_list_drag.following;
 }
 
@@ -1954,19 +1941,18 @@ static bool settings_drag_gesture(app_ctx_t *ctx,const ui_gesture_event_t *ev,
 static app_redraw_t settings_drag_tick(app_ctx_t *ctx) {
     if(s_list_drag.page!=s_page||ctx->request_app){settings_drag_reset();return APP_REDRAW_NONE;}
     if(!s_list_drag.tracking) {
-        if(s_list_drag.active&&s_list_drag.settle_pending&&
-           !(ctx->touch&&ctx->touch->touched)&&!ctx->consumed&&ctx->now_ms>=s_list_drag.settle_ms)
+        if(s_list_drag.settle_pending&&!(ctx->touch&&ctx->touch->touched)&&!ctx->consumed)
             return APP_REDRAW_AREA;
         return APP_REDRAW_NONE;
     }
     if(ctx->consumed)return APP_REDRAW_NONE;
     if(!ctx->touch||!ctx->touch->touched||ctx->touch->count!=1)return settings_drag_finish(ctx);
-    return settings_drag_sample(ctx,ctx->touch->x,ctx->touch->y);
+    return settings_drag_sample(ctx,ctx->touch->x,ctx->touch->y,false);
 }
 
 static bool settings_drag_present(app_ctx_t *ctx) {
     settings_drag_t *drag=&s_list_drag;
-    const bool settle=drag->settle_pending&&!drag->tracking&&ctx->now_ms>=drag->settle_ms&&
+    const bool settle=drag->settle_pending&&!drag->tracking&&
         !(ctx->touch&&ctx->touch->touched);
     if(!drag->frame_pending&&!settle)return false;
     if(ctx->request_app||drag->page!=s_page){settings_drag_reset();return true;}
@@ -1975,46 +1961,32 @@ static bool settings_drag_present(app_ctx_t *ctx) {
         render(ctx,ctx->fb);
         // 复用Pico已有的完整灰阶+12相目标白擦除+4相重推黑；白→白也维护，清理黑白快刷后的光学残影。
         // Reuse Pico's existing full-gray/12-white/four-black sequence, maintaining even white-to-white after temporary BW motion.
-        // 只定稿列表区域，800ms空闲/新接触延期保持，不能用保持等白的列表差分表代替。
-        // Settle only the list after800ms idle with contact deferral; an equal-white-held list profile cannot erase these ghosts.
+        // 松手直接绘制最终灰阶，省掉最后一帧黑白；保留缓存供下次跟手。
+        // Draw final grays on lift instead of a final BW frame; keep the cache for the next drag.
         guard_draw_result(ctx->hl,update_display_area_full_with(ctx->hl,
             display_reader_soft_turn_waveform(),MODE_GL16,drag->area));
-        settings_drag_reset();s_scroll_drag_consumed=false;
+        drag->active=false;
+        drag->settle_pending=false;
+        drag->shown_offset=-1;
+        s_scroll_drag_consumed=false;
     } else {
-        const int64_t started_us=esp_timer_get_time();
         settings_drag_blit(ctx);
         const EpdWaveform* motion=display_settings_motion_waveform();
         // 仅变化像素加强擦除，未变白底和静止字均保持，避免按住拖动时整片白闪。
         // Strengthen changed-pixel erasure while holding unchanged backgrounds/glyphs, avoiding whole-background flashes during held dragging.
         guard_draw_result(ctx->hl,update_display_area_diff_with(ctx->hl,
             motion?motion:&E0470_FOLLOW_WAVEFORM,MODE_DU,drag->area));
-        // 推屏期间无法采样触摸；识别快滑时扣除这段时间，最多补偿300ms。
-        // Display output blocks touch sampling; exclude up to300ms from this contact's flick duration.
-        if(drag->tracking) {
-            int64_t elapsed_us=esp_timer_get_time()-started_us;
-            if(elapsed_us>0) {
-                drag->blocked_ms+=elapsed_us/1000;
-                if(drag->blocked_ms>SETTINGS_QUICK_MS)drag->blocked_ms=SETTINGS_QUICK_MS;
-            }
-        }
         drag->frame_pending=false;drag->shown_offset=*drag->offset;drag->frame_ms=ctx->now_ms;
     }
     return true;
 }
 
-// 快滑仍按原步长推进，但复用同一黑白缓存，取消每次松手和周期计数造成的补刷。
-// Retain discrete quick-step distances, reusing one BW cache without per-release or counted cleanup.
+// 离散回退若在松手才移动，也走同一灰阶定稿出口。
+// The discrete fallback also settles in gray when it first moves on lift.
 static void settings_drag_quick(app_ctx_t *ctx) {
     settings_drag_t *drag=&s_list_drag;
-    if(!settings_plain_list()||!drag->offset||drag->disabled)return;
-    if(!drag->active) {
-        if(!settings_drag_cache(ctx)){drag->disabled=true;return;}
-        drag->active=true;drag->shown_offset=-1;
-    }
-    drag->frame_pending=true;
-    if(!drag->tracking) {
-        drag->settle_pending=true;drag->settle_ms=ctx->now_ms+SETTINGS_HOLD_IDLE_MS;
-    }
+    if(settings_plain_list()&&drag->offset&&ctx->released&&!drag->tracking)
+        drag->settle_pending=true;
 }
 
 static void settings_prepare_profile(void) {
@@ -2036,7 +2008,6 @@ static void on_enter(app_ctx_t *ctx) {
     s_shelf_style_from_manage=s_shelf_style_requested;s_shelf_style_requested=false;
     if(s_shelf_style_from_manage)s_page=SETTINGS_SHELF_STYLE;
     s_style_scroll = s_main_scroll = s_font_page = s_wallpaper_page = 0;
-    s_main_group = -1;
     s_collage_prepare_pending = false;
     s_scroll_drag_consumed = s_scroll_present_pending = false;
     s_wallpaper_selected = -1;
@@ -2103,9 +2074,9 @@ static app_redraw_t reset_tick(void) {
 }
 
 static app_redraw_t on_tick(app_ctx_t *ctx) {
-    if(s_list_drag.tracking||s_list_drag.active) {
+    if(s_list_drag.tracking||s_list_drag.settle_pending) {
         app_redraw_t redraw=settings_drag_tick(ctx);
-        if(redraw!=APP_REDRAW_NONE||s_list_drag.active)return redraw;
+        if(redraw!=APP_REDRAW_NONE||s_list_drag.settle_pending)return redraw;
     }
     // 屏幕修复：先画最终结果，再在 tick 中整屏恢复；成功后不重复推页。
     // Paint the final notice before the tick's full restoration; do not push the page twice on success.
@@ -2448,9 +2419,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     if(s_page==SETTINGS_FACTORY_RESET)return reset_gesture(ctx,ev);
     if (s_page == SETTINGS_TEXT_EDIT) return profile_editor_gesture(ctx, ev);
     if (s_page == SETTINGS_MAIN || s_page == SETTINGS_BLUETOOTH || s_page == SETTINGS_BLE_SCAN || s_page == SETTINGS_SHELF_STYLE) {
-        // 两级分组都单屏放下，主设置页不再需要滚动。
-        // Both levels fit one screen, so the main settings page never scrolls.
-        int limit = 0;
+        int limit = SETTINGS_SCROLL_MAX;
         int *offset = &s_main_scroll;
         if (s_page == SETTINGS_SHELF_STYLE) {
             limit=263+SHELF_STYLE_CHOICES*253-23-settings_viewport_end()+12;
@@ -2615,7 +2584,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
                 snprintf(s_notice,sizeof(s_notice),"保存失败，请重试");return APP_REDRAW_PAGE;
             }
             s_font_page=0;
-            if (s_main_scroll>0) s_main_scroll=0;
+            if (s_main_scroll>SETTINGS_SCROLL_MAX) s_main_scroll=SETTINGS_SCROLL_MAX;
             ui_text_set_system_scale(true);s_notice[0]=0;return APP_REDRAW_PAGE;
         }
         for (int slot=0;slot<l.slots;++slot) {
@@ -2873,30 +2842,7 @@ static app_redraw_t on_gesture(app_ctx_t *ctx, const ui_gesture_event_t *ev) {
     }
     if (y<160 || y>=UI_NAV_TOP || ev->x0<36 || ev->x0>=648) return APP_REDRAW_NONE;
     y+=s_main_scroll;
-    if (s_main_group < 0) {
-        // 索引页：点头像进资料，点分组进二级页。
-        // Index page: the profile card opens the editor, each group row opens its page.
-        if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
-        int pick=-1;
-        if (y>=SETTINGS_INDEX_Y && y<SETTINGS_INDEX_Y+SETTINGS_GROUP_COUNT*SETTINGS_ROW_H)
-            pick=(y-SETTINGS_INDEX_Y)/SETTINGS_ROW_H;
-        if (pick<0 || pick>=SETTINGS_GROUP_COUNT) return APP_REDRAW_NONE;
-        s_main_group=pick; s_main_scroll=0;
-        return APP_REDRAW_PAGE;
-    }
-    // 二级页：先按本组的行带裁剪，再把屏幕坐标还原成该组在长列表里的原始 Y。
-    // 组下方（或上方）的空白不属于任何一行；若只做平移，这段空白会落进下一分组的 Y 区间，
-    // 轻点就会误触发别的设置项。
-    // Group page: clip to this group's row band first, then map back to its original Y. Without the
-    // clip, blank space under the last row shifts into the next group's range and taps fire it.
-    {
-        const int band = s_main_group == 0 ? SETTINGS_WIRELESS_ROWS
-                       : s_main_group == 1 ? SETTINGS_DISPLAY_ROWS
-                       : s_main_group == 2 ? SETTINGS_PERSONAL_ROWS : SETTINGS_MAINTENANCE_ROWS;
-        const int local = y - SETTINGS_GROUP_TOP;
-        if (local < 0 || local >= band * SETTINGS_ROW_H) return APP_REDRAW_NONE;
-        y = settings_group_y(s_main_group) + local;
-    }
+    if (y>=180 && y<180+settings_profile_height()) { s_page=SETTINGS_PROFILE;return APP_REDRAW_PAGE; }
     int row;
     if (y>=SETTINGS_WIRELESS_Y && y<SETTINGS_WIRELESS_Y+SETTINGS_WIRELESS_ROWS*SETTINGS_ROW_H) {
         row=(y-SETTINGS_WIRELESS_Y)/SETTINGS_ROW_H;
@@ -2968,9 +2914,6 @@ static app_redraw_t on_key(app_ctx_t *ctx, int key) {
         ble_pt_scan_stop();
         if (key != 1) { s_page = SETTINGS_BLUETOOTH; s_ble_scroll = 0; return APP_REDRAW_PAGE; }
     }
-    if (key == 1 && s_page == SETTINGS_MAIN && s_main_group >= 0) {
-        s_main_group = -1; s_main_scroll = 0; return APP_REDRAW_PAGE;
-    }
     if (key == 1) { ui_nav_request(ctx, 0); return APP_REDRAW_NONE; }
     if(s_page==SETTINGS_SHELF_STYLE&&s_shelf_style_from_manage)return shelf_style_finish(ctx);
     if (s_page == SETTINGS_WALLPAPER_PREVIEW) {
@@ -3016,18 +2959,14 @@ static void settings_media_lost(app_ctx_t *ctx) {
 static void settings_media_ready(app_ctx_t *ctx) { settings_drag_reset(); (void)ctx; settings_prepare_profile(); }
 static bool settings_edge_back(app_ctx_t *ctx) {
     (void)ctx;
-    // 分组页同样可以用边缘右滑返回索引，与真正的三级页一致。
-    // Group pages accept the edge swipe back to the index, like the real sub-pages.
-    return (s_page != SETTINGS_MAIN || s_main_group >= 0) && !s_reset_pending && !s_local_pending &&
+    return s_page != SETTINGS_MAIN && !s_reset_pending && !s_local_pending &&
         !s_upgrade_restart && !s_pin_pending && !s_font_sync_confirm;
 }
 static bool settings_back_swipe_area(app_ctx_t *ctx,const ui_gesture_event_t *event) {
     (void)ctx;
     return s_page!=SETTINGS_TEXT_EDIT || event->y0<UI_SYSTEM_KEYBOARD_TOP;
 }
-// 中文：分组页不算主页面。判成主页面时侧键会去切底部标签页，返回键也不会回索引。
-// / A group page is not the main page: otherwise the side keys cycle tabs and back never returns to the index.
-static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN && s_main_group < 0; }
+static bool main_page_visible(app_ctx_t *ctx) { (void)ctx; return s_page == SETTINGS_MAIN; }
 static bool settings_navigation_enabled(app_ctx_t *ctx) {
     (void)ctx;
     return !s_reset_pending && !s_local_pending && !s_upgrade_restart && !s_pin_pending && !s_boot_pending;

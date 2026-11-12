@@ -12,13 +12,6 @@ import tempfile
 source = Path(__file__).resolve().parents[1] / "main/apps/app_book.c"
 layout_source = Path(__file__).resolve().parents[1] / "main/book/book_layout.c"
 
-def _has(name):
-    try:
-        function(name)
-        return True
-    except AssertionError:
-        return False
-
 def function(name, path=source):
     text = path.read_text(encoding="utf-8")
     import re
@@ -46,8 +39,6 @@ assert 'book_shelf_page_release();' in function('open_book_impl')
 assert function('open_book_impl').index('book_shelf_page_release();') < function('open_book_impl').index('invalidate_covers();')
 assert 'book_shelf_page_release();' not in function('sort_shelf')
 unit = r'''
-static int test_reader_rails;
-void display_reader_keep_rails(_Bool active){test_reader_rails=active;}
 typedef enum { UI_GESTURE_SWIPE_L, UI_GESTURE_SWIPE_R, UI_GESTURE_SWIPE_U, UI_GESTURE_SWIPE_D, UI_GESTURE_TAP, UI_GESTURE_CANCEL } ui_gesture_type_t;
 typedef struct{ui_gesture_type_t type;unsigned short x0,y0,x,y;}ui_gesture_event_t;
 #include <assert.h>
@@ -457,22 +448,6 @@ static app_reader_key_action_t app_settings_reader_key_action(unsigned key){retu
 static bool app_settings_main_fast_refresh(void){return false;}
 static app_redraw_t toggle_reader_fullscreen(app_ctx_t *ctx){(void)ctx;s_reader_fullscreen=!s_reader_fullscreen;return APP_REDRAW_PAGE;}
 '''
-# 上游 rc106 同步源给书架页加了排序落库、跳设置页和阅读控制暂停分支；本探针只验证
-# 书架 UI 的布局与命中，按真实签名给这些外部符号补桩即可。
-# Upstream's rc106 sync source added shelf-order persistence, a jump into the settings
-# app and reader-control pause hooks. This probe only checks shelf UI, so stub them.
-unit += r'''
-static bool s_rc_double_pending,s_manage_style_restore;
-static void rc_pause_auto(void){}
-static void rc_stop_auto(void){}
-static void rc_cancel_side(void){}
-static bool app_settings_try_shelf_order(unsigned order){(void)order;return true;}
-// 真实实现排在切片函数之后，这里先给 bulk_action / shelf_sort_gesture 一个声明。
-// The real body is appended after the sliced helpers; declare it for the callers first.
-static bool shelf_order_apply(app_ctx_t*ctx,int mode,bool desc);
-static void app_device_settings_request_shelf_style(void){}
-static const app_desc_t app_device_settings={0};
-'''
 unit += r"""
 #define SHELF_CATEGORY_LIMIT 128
 typedef struct{char path[288];int pages[2],count;bool available;}shelf_category_t;
@@ -496,15 +471,12 @@ unit += function('app_settings_book_paragraph_level', settings_source) + '\n'
 unit += function("book_layout_balanced_rect", layout_source) + "\n"
 unit += function("set_reader_view") + "\n"
 unit += function("ble_pt_action_for_usage", source.parents[2] / "components/ble_page_turner/src/ble_page_turner.c") + "\n"
-for name in ("app_book_reader_open", "inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_display_style", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "shelf_order_mode", "shelf_order_desc", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "shelf_progress_load", "scan_shelf", "refresh_cached_progress",
-             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "shelf_manage_rect", "shelf_sort_rect", "shelf_pager_group_rect", "shelf_search_rect", "shelf_search_clear_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "bulk_sort_rect", "shelf_sort_menu_rect", "leaves", "selected_count", "clear_selection", "toggle_selection", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "shelf_search_clear", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_select_row", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "import_finish", "shelf_sort_gesture", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
+for name in ("inline_ink_gray", "reader_margin_width", "reader_margin_levels", "reader_margin_level_for", "reader_margin_for_level", "slider_index", "reader_margin_input", "reader_area", "reader_fullscreen_progress_area", "body_rect_for_tracking", "body_rect", "progress_rect", "copy_text", "reader_footer_strip_number", "favorite_key", "favorite_read_handle", "shelf_hidden_key", "shelf_hidden_read_handle", "shelf_hidden_load", "shelf_hidden_save", "shelf_display_style", "shelf_rows", "row_rect", "shelf_category_add", "shelf_category_init", "shelf_category_matches", "shelf_category_remember", "shelf_category_restore", "shelf_categories_recount", "shelf_matches", "compare_books", "sort_shelf", "shelf_reserve", "delete_retry_find", "delete_retry_reserve", "delete_retry_discard", "scan_shelf_dir", "shelf_backfill_visit", "shelf_backfill_read_books", "shelf_progress_load", "scan_shelf", "refresh_cached_progress",
+             "pending_find", "pending_reserve", "pending_restore", "pending_discard", "pending_mark_latest", "pending_drop_invalidated", "pending_flush", "reader_page_offset", "save_progress", "retry_progress", "layout_name", "manage_panel", "manage_rect", "batch_rect", "manage_back_rect", "shelf_manage_rect", "shelf_sort_rect", "shelf_pager_group_rect", "shelf_search_rect", "shelf_search_clear_rect", "bulk_filter_rect", "bulk_nav_rect", "bulk_nav_hit", "bulk_sort_rect", "shelf_sort_menu_rect", "shelf_order_mode", "shelf_order_desc", "leaves", "selected_count", "clear_selection", "toggle_selection", "bookmark_compact", "search_begin", "refresh_search_matches", "search_finish", "shelf_search_clear", "refresh_capacity", "manage_apply", "manage_action", "batch_apply", "batch_action", "bulk_turn_page", "bulk_finish", "bulk_select_row", "bulk_action", "bulk_control_at", "menu_handle_enabled", "reader_manual_refresh", "apply_reader_option", "reader_return", "reader_key_action", "import_finish", "shelf_sort_gesture", "on_key", "on_key_long", "draw_wrapped_name", "open_requested_book", "on_enter", "book_on_exit"):
     unit += function(name) + "\n"
 for name in ("book_remote_direction", "shelf_turn_page", "shelf_page_arrow_rect", "reader_swipe_direction"):
     unit += function(name) + "\n"
 unit += "static unsigned app_settings_system_font_size(void){return 100;}\n"
-# 排序落库的真实实现：no-op 桩会让后面 s_shelf_order 的断言失真。
-# Real sort persistence: a no-op stub would invalidate the later s_shelf_order asserts.
-unit += function('shelf_order_apply') + "\n"
 for name in ("apply_reader_layout", "reader_ui_extra", "reader_slider_rect", "reader_slider_map", "reader_slider_begin", "reader_slider_move", "reader_slider_commit"):
     unit += function(name) + "\n"
 unit += r'''
@@ -792,7 +764,7 @@ int main(void) {
     assert(bulk_turn_page(&ctx,1)==APP_REDRAW_NONE);
     EpdRect sort_name=bulk_sort_rect(0);
     assert(bulk_action(&ctx,sort_name.x+20,sort_name.y+20)==APP_REDRAW_PAGE&&selected_count()==1);
-    EpdRect sort_done=bulk_sort_rect(6);
+    EpdRect sort_done=bulk_sort_rect(5);
     assert(bulk_action(&ctx,sort_done.x+20,sort_done.y+20)==APP_REDRAW_PAGE&&!s_sort_menu&&selected_count()==1);
     assert(bulk_action(&ctx,600,267)==APP_REDRAW_PAGE&&!s_bulk_selecting&&!selected_count());
     assert(bulk_select_row(&ctx,0)==APP_REDRAW_PAGE);
@@ -918,11 +890,7 @@ int main(void) {
     assert(test_open_calls==calls+1&&s_view==READING&&!s_scan_pending&&s_reader_return_home);
     test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
-    assert(app_book_reader_open());
-    for(int panel=0;panel<12;++panel){s_reader_panel=panel;assert(app_book_reader_open());}
-    s_view=SHELF;assert(!app_book_reader_open());s_view=TOC;assert(!app_book_reader_open());
-    s_view=READING;s_text=NULL;assert(!app_book_reader_open());s_text="body";
-    test_reader_rails=1;book_on_exit(&ctx);assert(!s_reader_return_home&&!test_reader_rails);
+    book_on_exit(&ctx);assert(!s_reader_return_home);
     s_view=READING;test_nav_target=-1;s_text="body";
     assert(on_key_long(&ctx,UI_KEY_2)==APP_REDRAW_FULL&&test_nav_target==-1&&s_view==READING);
     // 屏幕返回仍回来源，中键长按始终全刷。/ Screen back returns to source; middle holds always refresh.
@@ -984,44 +952,31 @@ int main(void) {
     clear_selection();toggle_selection(0);toggle_selection(14);
     char identity0[288],identity1[288];strcpy(identity0,s_shelf[0].path);strcpy(identity1,s_shelf[14].path);
     EpdRect menu=bulk_filter_rect(1);assert(bulk_action(&ctx,menu.x+10,menu.y+10)==APP_REDRAW_PAGE&&s_sort_menu);
-    for(int mode=0;mode<4;++mode)for(int desc=0;desc<2;++desc){
+    for(int mode=0;mode<3;++mode)for(int desc=0;desc<2;++desc){
         EpdRect choice=bulk_sort_rect(mode);bulk_action(&ctx,choice.x+5,choice.y+5);
-        choice=bulk_sort_rect(desc?5:4);bulk_action(&ctx,choice.x+5,choice.y+5);
+        choice=bulk_sort_rect(desc?4:3);bulk_action(&ctx,choice.x+5,choice.y+5);
         assert(selected_count()==2&&shelf_order_mode()==mode&&shelf_order_desc()==(bool)desc);
         int found=0;for(int i=0;i<s_count;++i)if(s_shelf[i].selected){assert(!strcmp(s_shelf[i].path,identity0)||!strcmp(s_shelf[i].path,identity1));++found;}assert(found==2);
     }
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&!s_sort_menu&&s_view==BULK&&selected_count()==2);
 
-    // rc106 主书架排序面板有 4 档依据 + 同面板升降序按钮：选中依据后面板保持打开，
-    // 便于接着切换方向。只有跨行/面板外点击与返回键才关闭面板。
-    // rc106's shelf panel has four sort keys plus in-panel direction buttons. Choosing a
-    // key keeps the panel open; only crossing/outside taps and Back dismiss it.
+    // 主书架三模式菜单不穿透，保留管理中的升降序；导入返回原管理分页。
+    // Main sorting owns contacts, retains management direction settings, and import returns to its management page.
     s_view=SHELF;test_shelf_style=5;s_batch_confirm=false;s_clear_confirm=false;s_scan_pending=false;
     EpdRect manage_header=shelf_manage_rect(),sort_header=shelf_sort_rect();
     assert(manage_header.x==420&&manage_header.x+manage_header.width<=sort_header.x);
     assert(!ui_rect_hit((EpdRect){24,79,326,74},manage_header.x,110));
-    const int sort_modes[]={1,2,0,3};            // 最近阅读 / 添加时间 / 书名 / 阅读进度
-    const unsigned sort_start[]={0,0,3,0};    // 与待选档不同，走默认方向分支
-    const unsigned sort_want[]={1,5,0,7};    // shelf_order_apply 的 0..7 编码
-    for(int i=0;i<4;++i){
-        s_shelf_order=sort_start[i];s_sort_menu=true;ctx.leaf=2;
+    const unsigned orders[]={1,5,0};
+    for(int i=0;i<3;++i){
+        s_shelf_order=orders[(i+1)%3];s_sort_menu=true;ctx.leaf=2;
         EpdRect row=shelf_sort_menu_rect(i);
         ui_gesture_event_t event={.type=UI_GESTURE_TAP,.x0=row.x+10,.y0=row.y+10,.x=row.x+12,.y=row.y+12};
-        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
-               s_shelf_order==sort_want[i]&&ctx.leaf==0&&s_recent_sort==(sort_modes[i]==1));
-        // 重复点同一档保留既有方向，不回落到默认方向。
-        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
-               s_shelf_order==sort_want[i]);
+        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_sort_menu&&s_shelf_order==orders[i]&&ctx.leaf==0);
+        assert(s_recent_sort==(i==0));
     }
-    // 面板内升降序按钮：只翻方向，不关闭面板。
-    s_shelf_order=3;s_sort_menu=true;ctx.leaf=2;
-    ui_gesture_event_t descending={.type=UI_GESTURE_TAP,.x0=520,.y0=500,.x=522,.y=502};
-    assert(shelf_sort_gesture(&ctx,&descending)==APP_REDRAW_PAGE&&s_sort_menu&&s_shelf_order==1);
-    ui_gesture_event_t ascending={.type=UI_GESTURE_TAP,.x0=400,.y0=500,.x=402,.y=502};
-    assert(shelf_sort_gesture(&ctx,&ascending)==APP_REDRAW_PAGE&&s_sort_menu&&s_shelf_order==3);
     s_shelf_order=3;s_sort_menu=true;
     ui_gesture_event_t same_sort={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=185};
-    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&s_sort_menu);
+    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&!s_sort_menu);
     s_sort_menu=true;ui_gesture_event_t crossing={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=275};
     shelf_sort_gesture(&ctx,&crossing);assert(!s_sort_menu&&s_shelf_order==3);
     s_sort_menu=true;crossing=(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=150,.y0=700,.x=150,.y=700};
@@ -1034,7 +989,7 @@ int main(void) {
     assert(import_finish(&ctx)==APP_REDRAW_PAGE&&s_view==BULK&&ctx.leaf==2&&selected_count()==selected_before_import);
     s_view=IMPORT;assert(on_key(&ctx,UI_KEY_1)==APP_REDRAW_PAGE&&s_view==BULK&&ctx.leaf==2);
     s_batch_confirm=true;assert(bulk_action(&ctx,import.x+5,import.y+5)==APP_REDRAW_NONE&&s_view==BULK);s_batch_confirm=false;
-    puts("PASS: shelf four-mode sort panel, persisted direction, crossing/outside tap isolation, relocated import and management-page return");
+    puts("PASS: shelf compact sort modes, persisted direction, crossing/outside tap isolation, relocated import and management-page return");
     free(s_shelf);free(s_categories);
     while(s_pending)pending_discard(s_pending->path);
     for(int i=0;i<65;i++){char path[340];snprintf(path,sizeof(path),"%s/book%03d.txt",test_roots[0].path,i);unlink(path);}rmdir(test_roots[0].path);
