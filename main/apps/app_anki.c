@@ -23,6 +23,7 @@
 #include "anki_layout.h"
 #include "anki_render.h"
 #include "anki_store.h"
+#include "anki_progress.h"
 #include "display.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -99,6 +100,10 @@ static char s_message[96];
 // 会话状态（含两块 16KB 卡面缓冲）常驻 PSRAM，避免占内部 RAM。
 // Session state (with two 16KB card buffers) stays in PSRAM, off internal RAM.
 static anki_session_t* s_session;
+// FILES 视图复用：0 = .apkg 导入，1 = .akb 恢复；二次确认选中的行（-1 = 无）。
+// FILES view reuse: 0 = .apkg import, 1 = .akb restore; -1 = no confirmation.
+static int s_file_mode;
+static int s_confirm_index = -1;
 
 // Anki 是系统页：所有视图（卡组列表/文件/忙碌/学习/小结）统一走系统字体，
 // 跟随「设置」里指定的系统字体；主循环每次切页都会先
@@ -188,6 +193,26 @@ static EpdRect row_delete_rect(int index) {
     return row;
 }
 
+/// 行内导出钮 ↑：[532,580)，与删除钮 [588,636) 间隙 8 px，命中区不重叠。
+/// In-row export button: [532,580), 8 px clear of delete [588,636).
+static EpdRect row_export_rect(int index) {
+    EpdRect row = row_rect(index);
+    row.x = row.x + row.width - 112;
+    row.width = 48;
+    row.y += 8;
+    row.height -= 16;
+    return row;
+}
+
+/// 底部「恢复」：第二格 (272,1096,220,96)，右端 492 < 可用右界。
+/// Bottom-bar "restore": second cell (272,1096,220,96).
+static EpdRect bar_restore_rect(void) {
+    return (EpdRect){.x = UI_MARGIN + 220 + UI_GAP,
+                     .y = UI_BAR_TOP,
+                     .width = 220,
+                     .height = UI_BAR_H};
+}
+
 static EpdRect bar_button_rect(void) {
     return (EpdRect){.x = UI_MARGIN, .y = UI_BAR_TOP, .width = 220, .height = UI_BAR_H};
 }
@@ -198,6 +223,25 @@ static void message_set(const char* text) {
         return;
     }
     snprintf(s_message, sizeof(s_message), "%s", text);
+}
+
+/// 恢复结果文案按 §2.5 错误码映射；成功汇总「覆盖 N 张 / 跳过 M 张」。
+/// Map restore results to the §2.5 error codes; report covered/skipped.
+static void restore_message(esp_err_t err, const anki_progress_result_t* result) {
+    char line[96];
+    if (err == ESP_OK) {
+        snprintf(line, sizeof(line), "覆盖 %d 张 / 跳过 %d 张", result->covered,
+                 result->skipped);
+    } else if (err == ESP_ERR_NOT_FOUND) {
+        snprintf(line, sizeof(line), "%s", "未找到对应卡组，请先导入原 .apkg");
+    } else if (err == ESP_ERR_INVALID_VERSION || err == ESP_ERR_INVALID_SIZE) {
+        snprintf(line, sizeof(line), "%s", "备份文件无法识别");
+    } else if (err == ESP_ERR_NOT_SUPPORTED) {
+        snprintf(line, sizeof(line), "%s", "卡组过大，暂不支持恢复（上限 20000 张）");
+    } else {
+        snprintf(line, sizeof(line), "%s", "恢复失败，进度未改变");
+    }
+    message_set(line);
 }
 
 /// 取路径末段文件名，提示语里只显示它。/ Last path segment; only it is shown in hints.
@@ -275,6 +319,29 @@ static void scan_apkg(void) {
     if (s_page < 0) s_page = 0;
 }
 
+/// 备份枚举回调：复用 s_lists->files[]，显式清零新增项（0xAA 约定）。
+/// Backup visitor: reuse s_lists->files[], explicitly zero each new item.
+static bool visit_backup(const char* path, const char* filename, void* ctx) {
+    anki_lists_t* lists = (anki_lists_t*)ctx;
+    if (lists->file_count >= LIST_MAX) return false;
+    apkg_item_t* item = &lists->files[lists->file_count];
+    memset(item, 0, sizeof(*item));
+    snprintf(item->name, sizeof(item->name), "%.127s", filename);
+    snprintf(item->path, sizeof(item->path), "%.280s", path);
+    struct stat st;
+    item->size = stat(path, &st) == 0 ? st.st_size : 0;
+    ++lists->file_count;
+    return true;
+}
+
+static void scan_backups(void) {
+    if (!lists_ready()) return;
+    s_lists->file_count = 0;
+    anki_progress_list_backups(visit_backup, s_lists);
+    if (s_page >= page_count(s_lists->file_count)) s_page = page_count(s_lists->file_count) - 1;
+    if (s_page < 0) s_page = 0;
+}
+
 // 学习页的内容区：首行上沿、末行下沿，以及底部提示行（正面）与评分按钮
 // （背面）各占多高。/ The study page's content band: where the first line
 // starts, where the content ends, and the room for the bottom hint (front)
@@ -344,12 +411,38 @@ static void session_start(int deck_index) {
         s_view = ANKI_VIEW_DECKS;
         return;
     }
-    SESS()->session_count =
-        anki_store_session(&SESS()->deck, SESS()->session, ANKI_SESSION_MAX);
-    SESS()->session_pos = 0;
-    SESS()->studied = 0;
-    SESS()->again = 0;
-    SESS()->good_or_better = 0;
+    // 日基准先推进：续学的 day 绑定与今日队列都以此为准（E4）。
+    // Advance the day first: resume day binding and today's queue share it.
+    anki_store_sync_day(&SESS()->deck);
+    bool resumed = false;
+    anki_resume_t snap = {0};
+    if (anki_store_resume_load(&SESS()->deck, &snap) == ESP_OK) {
+        int indices[ANKI_SESSION_MAX] = {0};
+        int n = anki_store_resume_indices(&SESS()->deck, &snap, indices,
+                                          ANKI_SESSION_MAX);
+        if (n > 0 && n == snap.session_count) {
+            memset(SESS()->session, 0, sizeof(SESS()->session));  // 0xAA 约定
+            memcpy(SESS()->session, indices, sizeof(int) * (size_t)n);
+            SESS()->session_count = n;
+            SESS()->session_pos = snap.session_pos;
+            SESS()->studied = snap.studied;
+            SESS()->again = snap.again;
+            SESS()->good_or_better = snap.good_or_better;
+            resumed = true;
+        }
+    }
+    if (!resumed) {
+        SESS()->session_count =
+            anki_store_session(&SESS()->deck, SESS()->session, ANKI_SESSION_MAX);
+        SESS()->session_pos = 0;
+        SESS()->studied = 0;
+        SESS()->again = 0;
+        SESS()->good_or_better = 0;
+        // 重建后补写初始状态（pos=0）：一张没学就离开也能续，并固定 day。
+        // Persist the initial state so leaving before the first grade resumes.
+        (void)anki_store_resume_save(&SESS()->deck, SESS()->session,
+                                     SESS()->session_count, 0, 0, 0, 0);
+    }
     SESS()->active = true;
     // 整库已载入：这里是 Anki 页内存占用的峰值点位。
     // The whole deck is loaded: this is the Anki page's memory peak.
@@ -400,6 +493,11 @@ static void session_release(void) {
 static void session_next(void) {
     ++SESS()->session_pos;
     if (SESS()->session_pos >= SESS()->session_count) {
+        // E3：走到小结视为本轮结束，清除续学状态；下一次重建今日队列。
+        // 切勿在 session_release / anki_on_exit / anki_before_lock 里 clear（E1）。
+        // E3: reaching the summary ends the round; never clear on the leave
+        // paths (session_release / anki_on_exit / anki_before_lock, E1).
+        anki_store_resume_clear(SESS()->deck.deck_id);
         s_view = ANKI_VIEW_SUMMARY;
         return;
     }
@@ -420,6 +518,19 @@ static void session_grade(anki_grade_t grade) {
     ++SESS()->studied;
     if (grade == ANKI_GRADE_AGAIN) ++SESS()->again;
     else ++SESS()->good_or_better;
+    // 逐卡进度已落盘；紧接着覆盖写续学状态（游标前进一步）。写失败只记日志，
+    // 绝不打断会话、绝不回滚已成功的评分（I3 / E12）。
+    // Per-card progress is already on disk; then overwrite the resume state.
+    // A failed state write never interrupts the session or rolls back a grade.
+    int next_pos = SESS()->session_pos + 1;
+    if (next_pos < SESS()->session_count) {
+        esp_err_t state_err = anki_store_resume_save(
+            &SESS()->deck, SESS()->session, SESS()->session_count, next_pos,
+            SESS()->studied, SESS()->again, SESS()->good_or_better);
+        if (state_err != ESP_OK) {
+            ESP_LOGW(TAG, "resume state write failed (%d)", state_err);
+        }
+    }
     session_next();
 }
 
@@ -429,11 +540,42 @@ static void draw_deck_row(uint8_t* fb, int index, const anki_deck_summary_t* dec
     EpdRect row = row_rect(index);
     ui_draw_round_rect(fb, row, UI_BTN_RADIUS, UI_GRAY_WHITE);
     char stats[64];
-    snprintf(stats, sizeof(stats), "新 %d · 复习 %d · 共 %d", deck->fresh, deck->due, deck->total);
+    char short_stats[64];
+    char resume[32];
+    snprintf(stats, sizeof(stats), "新 %d · 复习 %d · 共 %d", deck->fresh, deck->due,
+             deck->total);
+    snprintf(short_stats, sizeof(short_stats), "新 %d · 复习 %d", deck->fresh, deck->due);
+    snprintf(resume, sizeof(resume), "续 %d/%d", deck->resume_pos, deck->resume_count);
+    // PRD §4.2 自省略：文字起点 x=60，按钮带左界 532 → 净宽 472 px。
+    // 用 ui_text_fixed_width_px() 按实际系统字号实测，不缩字号、不新增第三行。
+    // Auto-elide by measured width at the effective system size; no shrink,
+    // no third line (PRD §4.2).
+    const int avail = 472;
+    const int px = ui_text_effective_px(UI_PX_CAPTION);
+    char line[160];
+    char candidate[160];
+    if (deck->resume_count <= 0) {
+        snprintf(line, sizeof(line), "%s", stats);
+    } else {
+        snprintf(candidate, sizeof(candidate), "%s   %s", stats, resume);
+        if (ui_text_fixed_width_px(px, candidate) <= avail) {
+            snprintf(line, sizeof(line), "%s", candidate);
+        } else {
+            // 由低到高省略：先去「· 共 Z」，再把「续 N/M」缩为单字「续」。
+            snprintf(candidate, sizeof(candidate), "%s   %s", short_stats, resume);
+            if (ui_text_fixed_width_px(px, candidate) <= avail) {
+                snprintf(line, sizeof(line), "%s", candidate);
+            } else {
+                // 卡组名与「续」不得同时被省略；这是最低保底。
+                snprintf(line, sizeof(line), "%s   续", short_stats);
+            }
+        }
+    }
     ui_text(fb, row.x + 20, row.y + 10, UI_PX_LABEL, deck->name, EPD_DRAW_ALIGN_LEFT, false);
-    ui_text(fb, row.x + 20, row.y + 10 + UI_PX_LABEL + 6, UI_PX_CAPTION, stats,
+    ui_text(fb, row.x + 20, row.y + 10 + UI_PX_LABEL + 6, UI_PX_CAPTION, line,
             EPD_DRAW_ALIGN_LEFT, false);
-    // 删除小钮。/ Delete button.
+    // 导出 ↑ 与既有删除 ×；命中区间隙 8 px，不重叠。
+    ui_draw_button(fb, row_export_rect(index), "↑", false);
     EpdRect del = row_delete_rect(index);
     ui_draw_button(fb, del, "×", false);
 }
@@ -446,6 +588,25 @@ static void draw_file_row(uint8_t* fb, int index, const apkg_item_t* item) {
     ui_text(fb, row.x + 20, row.y + 10, UI_PX_LABEL, item->name, EPD_DRAW_ALIGN_LEFT, false);
     ui_text(fb, row.x + 20, row.y + 10 + UI_PX_LABEL + 6, UI_PX_CAPTION, size,
             EPD_DRAW_ALIGN_LEFT, false);
+}
+
+/// 二次确认提示带（U2：同视图中部，零新增视图）。文案点明日基准会一并恢复、
+/// 操作不可撤销（R-1）。/ In-view confirmation band (U2); states that the day
+/// base is restored too and that the action is irreversible (R-1).
+static void draw_confirm_band(uint8_t* fb) {
+    EpdRect band = {.x = UI_MARGIN,
+                    .y = UI_CONTENT_TOP + 260,
+                    .width = ui_content_width(),
+                    .height = 132};
+    ui_draw_round_rect(fb, band, UI_BTN_RADIUS, UI_GRAY_WHITE);
+    ui_text(fb, band.x + 16, band.y + 14, UI_PX_CAPTION,
+            "将用备份覆盖该卡组学习进度与日基准，", EPD_DRAW_ALIGN_LEFT, false);
+    ui_text(fb, band.x + 16, band.y + 14 + UI_PX_CAPTION + 8, UI_PX_CAPTION,
+            "此操作不可撤销；卡片正文与模板不变。", EPD_DRAW_ALIGN_LEFT, false);
+    if (s_lists && s_confirm_index >= 0 && s_confirm_index < s_lists->file_count) {
+        ui_text(fb, band.x + 16, band.y + 14 + 2 * (UI_PX_CAPTION + 8), UI_PX_CAPTION,
+                base_name(s_lists->files[s_confirm_index].path), EPD_DRAW_ALIGN_LEFT, false);
+    }
 }
 
 // 列表分页与书架/文件页同款：绘制、命中、目标共用一套坐标。
@@ -483,8 +644,18 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
             bool decks = s_view == ANKI_VIEW_DECKS;
             int total = decks ? (lists_ready() ? s_lists->deck_count : 0)
                               : (lists_ready() ? s_lists->file_count : 0);
-            snprintf(subtitle, sizeof(subtitle), "%s", decks ? "选择卡组开始学习" : "选择 .apkg 导入");
-            ui_draw_header(fb, decks ? ANKI_TITLE : "导入 Anki 卡组", subtitle);
+            const char* base_subtitle =
+                decks ? "选择卡组开始学习"
+                      : (s_file_mode == 1 ? "选择进度备份恢复 · 会覆盖进度，不可撤销"
+                                          : "选择 .apkg 导入");
+            // 操作结果提示直接落在副标题：DECKS/FILES 视图没有独立的提示带。
+            // Surface operation feedback in the subtitle; no separate band here.
+            snprintf(subtitle, sizeof(subtitle), "%s",
+                     s_message[0] ? s_message : base_subtitle);
+            ui_draw_header(fb, decks ? ANKI_TITLE
+                                    : (s_file_mode == 1 ? "选择进度备份恢复"
+                                                        : "导入 Anki 卡组"),
+                           subtitle);
             int rows = rows_per_page();
             int first = s_page * rows;
             int last = first + rows;
@@ -494,13 +665,25 @@ static void render(app_ctx_t* ctx, uint8_t* fb) {
                 else draw_file_row(fb, i, &s_lists->files[i]);
             }
             if (total == 0) {
-                const char* hint = decks ? "还没有卡组，先导入 .apkg 文件" : "TF 卡上未找到 .apkg 文件";
+                const char* hint =
+                    decks ? "还没有卡组，先导入 .apkg 文件"
+                          : (s_file_mode == 1 ? "未找到 .akb 备份文件（两根均已扫描）"
+                                              : "TF 卡上未找到 .apkg 文件");
                 ui_text(fb, UI_MARGIN, UI_CONTENT_TOP + 40, UI_PX_BODY, hint,
                         EPD_DRAW_ALIGN_LEFT, false);
             }
             draw_pager(fb, s_page, page_count(total));
             // 底栏：主操作按钮 + 菜单把手。/ Bar: primary action plus menu handle.
-            ui_draw_button(fb, bar_button_rect(), decks ? "导入 Import" : "返回 Back", false);
+            if (decks) {
+                ui_draw_button(fb, bar_button_rect(), "导入 Import", false);
+                ui_draw_button(fb, bar_restore_rect(), "恢复", false);
+            } else if (s_file_mode == 1 && s_confirm_index >= 0) {
+                ui_draw_button(fb, bar_button_rect(), "确认恢复", false);
+                ui_draw_button(fb, bar_restore_rect(), "取消", false);
+                draw_confirm_band(fb);
+            } else {
+                ui_draw_button(fb, bar_button_rect(), "返回 Back", false);
+            }
             ui_draw_menu_handle(fb, false);
             break;
         }
@@ -619,6 +802,11 @@ static void on_enter(app_ctx_t* ctx) {
     // 防御：带会话状态重进本页时先卸载旧会话。/ Defensive: drop a live
     // session when re-entering the page.
     session_release();
+    s_confirm_index = -1;
+    s_file_mode = 0;
+    // 先自愈残留 tmp/bak 与孤儿 .aks，再枚举卡组：列表必须看到提交后的完整文件。
+    // Recover stranded tmp/bak and orphan .aks before enumerating decks.
+    anki_progress_recover();
     // 文件页带了 .apkg 进来：保持忙碌态，等下一 tick 导入，别被卡组列表盖掉。
     // / Arriving from the file page with an .apkg: stay busy and import on the
     // next tick instead of painting the deck list over it.
@@ -665,6 +853,8 @@ static void import_request(const char* path) {
     if (!path || !*path) return;
     snprintf(s_pending_path, sizeof(s_pending_path), "%s", path);
     s_pending_import = true;
+    s_file_mode = 0;
+    s_confirm_index = -1;
     // name 最长 127，s_message 只有 96，限宽到 75 保证中文前缀 + 省略号也放得下。
     // / Bound the field so the CJK prefix and ellipsis always fit in s_message.
     snprintf(s_message, sizeof(s_message), "正在导入 %.75s …", base_name(path));
@@ -734,6 +924,28 @@ static app_redraw_t handle_tap(uint16_t x, uint16_t y, app_ctx_t* ctx) {
         case ANKI_VIEW_FILES: {
             if (!lists_ready()) return APP_REDRAW_NONE;
             int total = s_view == ANKI_VIEW_DECKS ? s_lists->deck_count : s_lists->file_count;
+            // 二次确认态是模态：只允许确认/取消，其余命中一律忽略，防误触列表。
+            // Confirmation is modal: only confirm/cancel are live.
+            if (s_view == ANKI_VIEW_FILES && s_file_mode == 1 && s_confirm_index >= 0) {
+                if (ui_rect_hit(bar_button_rect(), x, y)) {
+                    anki_progress_result_t result = {0};
+                    esp_err_t err = anki_progress_restore(
+                        s_lists->files[s_confirm_index].path, &result);
+                    restore_message(err, &result);
+                    s_confirm_index = -1;
+                    s_file_mode = 0;
+                    s_view = ANKI_VIEW_DECKS;
+                    s_page = 0;
+                    scan_decks();
+                    return APP_REDRAW_FULL;
+                }
+                if (ui_rect_hit(bar_restore_rect(), x, y)) {
+                    s_confirm_index = -1;  // 取消不产生任何写盘
+                    message_set("已取消恢复");
+                    return APP_REDRAW_PAGE;
+                }
+                return APP_REDRAW_NONE;
+            }
             int pager = ui_pager_hit_at(x, y, ANKI_PAGER_TOP);
             if (pager >= 0) {
                 int target = ui_pager_target(pager, s_page, page_count(total));
@@ -754,14 +966,27 @@ static app_redraw_t handle_tap(uint16_t x, uint16_t y, app_ctx_t* ctx) {
                                           update_display_mode(ctx->hl, APP_PAGE_REFRESH_MODE));
                         return APP_REDRAW_DONE;
                     }
+                    s_file_mode = 0;
+                    s_confirm_index = -1;
                     s_view = ANKI_VIEW_FILES;
                     s_page = 0;
                     scan_apkg();
                 } else {
+                    s_file_mode = 0;
+                    s_confirm_index = -1;
                     s_view = ANKI_VIEW_DECKS;
                     s_page = 0;
                     scan_decks();
                 }
+                return APP_REDRAW_PAGE;
+            }
+            // 底部「恢复」：Q3 修正，不实现「无 TF 卡禁用」分支。
+            if (s_view == ANKI_VIEW_DECKS && ui_rect_hit(bar_restore_rect(), x, y)) {
+                s_file_mode = 1;
+                s_confirm_index = -1;
+                s_view = ANKI_VIEW_FILES;
+                s_page = 0;
+                scan_backups();
                 return APP_REDRAW_PAGE;
             }
             int row = decks_hit(x, y);
@@ -777,8 +1002,24 @@ static app_redraw_t handle_tap(uint16_t x, uint16_t y, app_ctx_t* ctx) {
                     scan_decks();
                     return APP_REDRAW_PAGE;
                 }
+                // 行内 ↑：导出到活动根，成功提示最终路径。
+                if (ui_rect_hit(row_export_rect(row), x, y)) {
+                    char out_path[288] = {0};
+                    esp_err_t err = anki_progress_export(s_lists->decks[row].deck_id,
+                                                         out_path, sizeof(out_path));
+                    if (err == ESP_OK) {
+                        snprintf(s_message, sizeof(s_message), "已导出 %.60s", out_path);
+                    } else {
+                        message_set("导出失败，设备进度未改变");
+                    }
+                    return APP_REDRAW_PAGE;
+                }
                 session_start(row);
                 return APP_REDRAW_FULL;
+            }
+            if (s_file_mode == 1) {
+                s_confirm_index = row;  // 进入同视图二次确认
+                return APP_REDRAW_PAGE;
             }
             import_selected(row);
             return APP_REDRAW_PAGE;
@@ -839,6 +1080,12 @@ static app_redraw_t on_key(app_ctx_t* ctx, int key) {
                     }
                     return APP_REDRAW_NONE;
                 case ANKI_VIEW_FILES:
+                    if (s_file_mode == 1 && s_confirm_index >= 0) {
+                        s_confirm_index = -1;  // 返回键先取消确认
+                        return APP_REDRAW_PAGE;
+                    }
+                    s_file_mode = 0;
+                    s_confirm_index = -1;
                     s_view = ANKI_VIEW_DECKS;
                     s_page = 0;
                     scan_decks();

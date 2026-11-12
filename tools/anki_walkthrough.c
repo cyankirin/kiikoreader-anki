@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include "anki_apkg.h"
+#include "anki_progress.h"
 #include "anki_render.h"
 #include "anki_store.h"
 
@@ -89,6 +90,63 @@ static void clean_dir(const char* root) {
         }
         closedir(dir);
     }
+}
+
+/* 端到端补测用的整文件字节工具（只读写磁盘，不改被测源码语义）。
+   / Byte helpers for the end-to-end resume/export-restore section. */
+static uint32_t w_u32(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static int64_t w_i64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) v |= (uint64_t)p[i] << (8 * i);
+    return (int64_t)v;
+}
+
+static void w_wu32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static void w_wi64(uint8_t* p, int64_t v) {
+    uint64_t u = (uint64_t)v;
+    for (int i = 0; i < 8; ++i) p[i] = (uint8_t)((u >> (8 * i)) & 0xFFu);
+}
+
+static uint8_t* w_slurp(const char* path, size_t* out_len) {
+    *out_len = 0;
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long sz = ftell(f);
+    rewind(f);
+    if (sz <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    uint8_t* b = malloc((size_t)sz);
+    if (!b || fread(b, 1, (size_t)sz, f) != (size_t)sz) {
+        free(b);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    *out_len = (size_t)sz;
+    return b;
+}
+
+static bool w_write(const char* path, const void* data, size_t len) {
+    FILE* f = fopen(path, "wb");
+    if (!f) return false;
+    bool ok = fwrite(data, 1, len, f) == len;
+    return fclose(f) == 0 && ok;
 }
 
 typedef struct {
@@ -266,6 +324,96 @@ int main(int argc, char** argv) {
     printf("persisted: %d/8 cards survived reload\n", persisted);
     CHECK(persisted == 8 || (count < 8 && persisted == count));
     anki_store_unload(&reloaded);
+
+    /* ---------- 8b. 断点续学 + 导出/恢复 端到端 ----------
+       / 8b. Resume + export/restore end to end (stage-4 QA).
+       不依赖具体卡数，任意 .apkg 都自洽。/ Independent of the deck's card count. */
+    anki_store_sync_day(&deck);
+    static int resume_idx[ANKI_SESSION_MAX];
+    int resume_cnt = anki_store_session(&deck, resume_idx, ANKI_SESSION_MAX);
+    CHECK(resume_cnt > 0);
+    int resume_pos = resume_cnt > 1 ? 1 : 0;
+    CHECK(anki_store_resume_save(&deck, resume_idx, resume_cnt, resume_pos, 3, 1, 2) ==
+          ESP_OK);
+    anki_resume_t snap = {0};
+    CHECK(anki_store_resume_load(&deck, &snap) == ESP_OK);
+    CHECK(snap.session_count == resume_cnt && snap.session_pos == resume_pos);
+    CHECK(snap.studied == 3 && snap.again == 1 && snap.good_or_better == 2);
+    static int resume_map[ANKI_SESSION_MAX];
+    CHECK(anki_store_resume_indices(&deck, &snap, resume_map, ANKI_SESSION_MAX) ==
+          resume_cnt);
+
+    char backup[320] = {0};
+    CHECK(anki_progress_export(acc.max_id, backup, sizeof(backup)) == ESP_OK);
+    CHECK(backup[0] != 0);
+    struct stat bst;
+    CHECK(stat(backup, &bst) == 0 && bst.st_size > 0);
+
+    /* 快照 .akd，再模拟「换机后 day=0 + 卡片调度字段受损」。
+       / Snapshot .akd, then simulate a fresh device (day=0) plus damaged cards. */
+    size_t akd_len = 0;
+    uint8_t* akd_before = w_slurp(deck.path, &akd_len);
+    CHECK(akd_before != NULL && akd_len >= AKD_HEADER_BYTES);
+    int64_t saved_day = 0, saved_rtc = 0;
+    uint32_t table_at = 0, cards = 0;
+    if (akd_before) {
+        saved_day = w_i64(akd_before + AKD_OFF_DAY);
+        saved_rtc = w_i64(akd_before + AKD_OFF_LAST_RTC_DAY);
+        table_at = w_u32(akd_before + AKD_OFF_TABLE_AT);
+        cards = w_u32(akd_before + AKD_OFF_CARD_COUNT);
+        uint8_t* damaged = malloc(akd_len);
+        CHECK(damaged != NULL);
+        if (damaged) {
+            memcpy(damaged, akd_before, akd_len);
+            w_wi64(damaged + AKD_OFF_DAY, 0);
+            w_wi64(damaged + AKD_OFF_LAST_RTC_DAY, 0);
+            for (uint32_t k = 0; k < cards && k < 2; ++k) {
+                uint8_t* rec = damaged + table_at + (size_t)k * AKD_CARD_RECORD;
+                for (int j = 0; j < 7; ++j) {
+                    w_wu32(rec + AKD_CARD_OFF_TYPE + (size_t)j * 4,
+                           0x00C0FFEEu + (unsigned)j);
+                }
+            }
+            CHECK(w_write(deck.path, damaged, akd_len));
+            free(damaged);
+        }
+    }
+
+    anki_progress_result_t pres = {0};
+    CHECK(anki_progress_restore(backup, &pres) == ESP_OK);
+    CHECK(pres.deck_id == acc.max_id);
+    CHECK(pres.covered == (int)cards && pres.skipped == 0);
+    size_t akd_after_len = 0;
+    uint8_t* akd_after = w_slurp(deck.path, &akd_after_len);
+    CHECK(akd_after != NULL && akd_after_len == akd_len);
+    if (akd_after && akd_before && akd_after_len == akd_len) {
+        /* R-1：头 day/last_rtc_day 实际写回；I1：其余字节逐字节不变。
+           / R-1 header day write-back; I1 byte invariance outside allowed ranges. */
+        CHECK(w_i64(akd_after + AKD_OFF_DAY) == saved_day);
+        CHECK(w_i64(akd_after + AKD_OFF_LAST_RTC_DAY) == saved_rtc);
+        size_t diff = 0;
+        for (size_t k = 0; k < akd_len; ++k) {
+            if (k >= (size_t)AKD_OFF_DAY && k < (size_t)AKD_OFF_DAY + 16) continue;
+            bool allowed = false;
+            if (k >= table_at) {
+                size_t rel = k - table_at;
+                size_t rec = rel / AKD_CARD_RECORD;
+                size_t off = rel % AKD_CARD_RECORD;
+                if (rec < cards && off >= (size_t)AKD_CARD_OFF_TYPE &&
+                    off < (size_t)AKD_CARD_OFF_RESERVED) {
+                    allowed = true;
+                }
+            }
+            if (!allowed && akd_after[k] != akd_before[k]) ++diff;
+        }
+        CHECK(diff == 0);
+    }
+    free(akd_before);
+    free(akd_after);
+    /* 列表摘要新字段存在且不阻塞枚举。/ The list still enumerates every deck. */
+    list_acc_t after_list = {0};
+    CHECK(anki_store_list(visit_deck, &after_list) == ESP_OK);
+    CHECK(after_list.count == imp.deck_count);
 
     /* ---------- 9. 删除 / delete ---------- */
     CHECK(anki_store_delete(acc.max_id) == ESP_OK);

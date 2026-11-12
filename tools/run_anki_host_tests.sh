@@ -16,7 +16,7 @@ fi
 gcc "${flags[@]}" -Imain/anki -Imain/book -Imain -Itools/anki_stubs \
     tools/anki_host_test.c \
     main/anki/anki_json.c main/anki/anki_sqlite.c main/anki/anki_apkg.c \
-    main/anki/anki_render.c main/anki/anki_store.c \
+    main/anki/anki_render.c main/anki/anki_store.c main/anki/anki_progress.c \
     main/book/zip_reader.c main/book/html_text.c \
     tools/anki_stubs/miniz_tinfl.c \
     -DANKI_DIR="\"build/anki-tests/flash/anki\"" \

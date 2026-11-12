@@ -41,10 +41,11 @@
 #define ANKI_DIR "/flash/anki"
 #endif
 
-#define AKD_MAGIC "AKD1"
-#define AKD_VERSION 1u
-#define CARD_RECORD 52
-#define HEADER_BYTES 64
+/* .akd 布局常量统一在 anki_store.h 定义（值不变），progress 层只读复用。
+   / .akd layout constants now live in anki_store.h (unchanged values);
+   the progress layer reuses them read-only. */
+#define CARD_RECORD AKD_CARD_RECORD
+#define HEADER_BYTES AKD_HEADER_BYTES
 
 // 列表去重表容量：界面最多展示 96 个卡组，128 留有余量；超出后仍继续枚举，
 // 只是同 id 可能重复出现一次。/ Dedup table capacity: the UI shows at most
@@ -402,6 +403,11 @@ esp_err_t anki_store_import(const char* path, int* out_imported) {
         free(sub.notetype_slots);
         if (err == ESP_OK) {
             ++imported;
+            // E5：同 id 重新导入后旧会话队列可能已失效（卡片集合/顺序变化），
+            // 精确按 deck 清除续学状态，不误伤其它卡组。
+            // E5: a re-import of the same id may invalidate the old queue;
+            // clear only this deck's resume state.
+            anki_store_resume_clear(imp.decks[d].id);
         } else {
             ESP_LOGW(TAG, "deck %s write failed: %s", imp.decks[d].name, esp_err_to_name(err));
         }
@@ -785,6 +791,11 @@ esp_err_t anki_store_list(anki_deck_visit_fn visit, void* ctx) {
             // .akd on the active root takes the slot first and shadows the
             // healthy same-id copy on the other root.
             if (seen_count < ANKI_LIST_SEEN_MAX) seen[seen_count++] = id;
+            // I4：轻量探测续学状态填两个新字段；读失败静默置 0，不阻塞列表。
+            // I4: lightweight resume probe fills the two new fields; any read
+            // failure silently leaves them 0 and never blocks the list.
+            anki_store_resume_peek(summary.deck_id, roots[r], &summary.resume_pos,
+                                   &summary.resume_count);
             if (!visit(&summary, ctx)) {
                 closedir(dir);
                 return ESP_OK;
@@ -955,5 +966,292 @@ esp_err_t anki_store_delete(int64_t deck_id) {
             result = ESP_FAIL;
         }
     }
+    // E6：卡组删除后两根同 id 的续学状态一并清除，不产生孤儿记录。
+    // E6: dropping the deck also drops its resume state under both roots.
+    anki_store_resume_clear(deck_id);
     return result;
+}
+
+
+// ---------------------------------------------------------------- 续学状态 .aks
+
+/* 显式小端字节序列化：不 fwrite 结构体，消除 padding / 编译单元对齐差异。
+   / Explicit little-endian byte serialization: never fwrite the struct, so
+   padding and per-translation-unit alignment cannot leak into the file. */
+static void put_u32(uint8_t* p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+static void put_i64(uint8_t* p, int64_t v) {
+    uint64_t u = (uint64_t)v;
+    for (int i = 0; i < 8; ++i) p[i] = (uint8_t)((u >> (8 * i)) & 0xFFu);
+}
+
+static uint32_t get_u32(const uint8_t* p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
+
+static int64_t get_i64(const uint8_t* p) {
+    uint64_t u = 0;
+    for (int i = 0; i < 8; ++i) u |= (uint64_t)p[i] << (8 * i);
+    return (int64_t)u;
+}
+
+static void state_path_in(const char* root, int64_t deck_id, char out[96]) {
+    snprintf(out, 96, "%.64s/%lld%s", root, (long long)deck_id, ANKI_STATE_SUFFIX);
+}
+
+/* 由实际读到的 .akd 路径推出同目录同根的 .aks（E9 双根绑定）。
+   / Derive .aks from the .akd path actually read (E9 root binding). */
+static void state_path_for_deck(const anki_deck_t* deck, char out[96]) {
+    char root[96] = {0};
+    snprintf(root, sizeof(root), "%s", deck->path);
+    char* slash = strrchr(root, '/');
+    if (slash) *slash = 0;
+    state_path_in(root, deck->deck_id, out);
+}
+
+static uint32_t root_tag_of_root(const char* root) {
+    return strcmp(root, ANKI_DIR_TF) == 0 ? ANKI_ROOT_TAG_TF : ANKI_ROOT_TAG_FLASH;
+}
+
+static uint32_t root_tag_of_deck(const anki_deck_t* deck) {
+    char root[96] = {0};
+    snprintf(root, sizeof(root), "%s", deck->path);
+    char* slash = strrchr(root, '/');
+    if (slash) *slash = 0;
+    return root_tag_of_root(root);
+}
+
+/* 全体 cards[].id 的 FNV-1a 32，按 8 字节内存表示逐个累积。
+   / FNV-1a 32 over every cards[].id, accumulating its 8-byte representation. */
+static uint32_t deck_fingerprint(const anki_deck_t* deck) {
+    uint32_t h = ANKI_FNV1A_BASIS;
+    if (!deck || !deck->cards) return h;
+    for (int i = 0; i < deck->card_count; ++i) {
+        int64_t id = deck->cards[i].id;
+        h = anki_fnv1a(&id, sizeof(id), h);
+    }
+    return h;
+}
+
+/* 有效设备日：与 anki_store_sync_day()/anki_store_list() 的推进规则一致，
+   但为纯函数，可在 const deck 上做 day 绑定校验（E4 / E11 无 RTC 时保持）。
+   / Effective device day: the same advance rule as sync_day()/list(), but
+   pure so day binding works on a const deck; holds without an RTC. */
+static int64_t effective_day(int64_t file_day, int64_t last_rtc_day) {
+    int64_t today = anki_day_now();
+    if (today > last_rtc_day && last_rtc_day > 0) return file_day + (today - last_rtc_day);
+    if (last_rtc_day == 0 && today > 0) return today;
+    return file_day;
+}
+
+static void resume_serialize(const anki_resume_t* r, uint8_t buf[ANKI_RESUME_BYTES]) {
+    // 0xAA 约定：整块清零后再显式写字段，session_ids 未用槽与 reserved 恒 0。
+    // 0xAA rule: clear the whole block first; unused slots and reserved stay 0.
+    memset(buf, 0, ANKI_RESUME_BYTES);
+    memcpy(buf + 0, ANKI_STATE_MAGIC, 4);
+    put_u32(buf + 4, ANKI_STATE_VERSION);
+    put_u32(buf + 8, ANKI_RESUME_BYTES);
+    put_i64(buf + 16, r->deck_id);
+    put_u32(buf + 24, r->root_tag);
+    put_u32(buf + 28, (uint32_t)r->card_count);
+    put_u32(buf + 32, (uint32_t)r->session_count);
+    put_u32(buf + 36, (uint32_t)r->session_pos);
+    put_u32(buf + 40, (uint32_t)r->studied);
+    put_u32(buf + 44, (uint32_t)r->again);
+    put_u32(buf + 48, (uint32_t)r->good_or_better);
+    put_i64(buf + 52, r->day);
+    put_u32(buf + 60, r->fingerprint);
+    for (int i = 0; i < ANKI_SESSION_MAX; ++i) {
+        put_i64(buf + 64 + (size_t)i * 8, r->session_ids[i]);
+    }
+    // reserved[12] @464..512 已由 memset 清零；校验和覆盖 [16,512)。
+    put_u32(buf + 12, anki_fnv1a(buf + 16, ANKI_RESUME_BYTES - 16, ANKI_FNV1A_BASIS));
+}
+
+static esp_err_t resume_decode(const uint8_t* buf, anki_resume_t* out) {
+    if (!out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    if (!buf || memcmp(buf, ANKI_STATE_MAGIC, 4) != 0) return ESP_ERR_INVALID_SIZE;
+    uint32_t version = get_u32(buf + 4);
+    if (version != ANKI_STATE_VERSION) return ESP_ERR_INVALID_VERSION;
+    if (get_u32(buf + 8) != ANKI_RESUME_BYTES) return ESP_ERR_INVALID_SIZE;
+    if (get_u32(buf + 12) !=
+        anki_fnv1a(buf + 16, ANKI_RESUME_BYTES - 16, ANKI_FNV1A_BASIS)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    out->deck_id = get_i64(buf + 16);
+    out->version = version;
+    out->root_tag = get_u32(buf + 24);
+    out->card_count = (int32_t)get_u32(buf + 28);
+    out->session_count = (int32_t)get_u32(buf + 32);
+    out->session_pos = (int32_t)get_u32(buf + 36);
+    out->studied = (int32_t)get_u32(buf + 40);
+    out->again = (int32_t)get_u32(buf + 44);
+    out->good_or_better = (int32_t)get_u32(buf + 48);
+    out->day = get_i64(buf + 52);
+    out->fingerprint = get_u32(buf + 60);
+    for (int i = 0; i < ANKI_SESSION_MAX; ++i) {
+        out->session_ids[i] = get_i64(buf + 64 + (size_t)i * 8);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t resume_read(const char* path, anki_resume_t* out) {
+    if (!path || !out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    FILE* f = fopen(path, "rb");
+    if (!f) return ESP_ERR_NOT_FOUND;
+    uint8_t buf[ANKI_RESUME_BYTES];
+    memset(buf, 0, sizeof(buf));
+    size_t got = fread(buf, 1, sizeof(buf), f);
+    bool closed = fclose(f) == 0;
+    if (got != sizeof(buf) || !closed) return ESP_ERR_INVALID_SIZE;
+    return resume_decode(buf, out);
+}
+
+esp_err_t anki_store_resume_load(const anki_deck_t* deck, anki_resume_t* out) {
+    if (!deck || !out) return ESP_ERR_INVALID_ARG;
+    memset(out, 0, sizeof(*out));
+    char path[96] = {0};
+    state_path_for_deck(deck, path);
+    anki_resume_t r = {0};
+    esp_err_t err = resume_read(path, &r);
+    if (err != ESP_OK) return err;  // 版本/校验和错误按 §2.5 原样返回
+    // 绑定字段逐项校验：任一不符即「无有效状态」（E4/E5/E8/E9 静默降级）。
+    // Binding fields: any mismatch means "no valid state" (silent rebuild).
+    if (r.deck_id != deck->deck_id) return ESP_ERR_NOT_FOUND;
+    if (r.root_tag != root_tag_of_deck(deck)) return ESP_ERR_NOT_FOUND;
+    if (r.card_count != deck->card_count) return ESP_ERR_NOT_FOUND;
+    if (r.day != effective_day(deck->day, deck->last_rtc_day)) return ESP_ERR_NOT_FOUND;
+    if (r.fingerprint != deck_fingerprint(deck)) return ESP_ERR_NOT_FOUND;
+    if (r.session_count <= 0 || r.session_count > ANKI_SESSION_MAX) return ESP_ERR_NOT_FOUND;
+    if (r.session_pos < 0 || r.session_pos >= r.session_count) return ESP_ERR_NOT_FOUND;
+    for (int i = 0; i < r.session_count; ++i) {
+        bool found = false;
+        for (int k = 0; k < deck->card_count; ++k) {
+            if (deck->cards[k].id == r.session_ids[i]) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) return ESP_ERR_NOT_FOUND;
+    }
+    *out = r;
+    return ESP_OK;
+}
+
+esp_err_t anki_store_resume_save(const anki_deck_t* deck, const int* session_indices,
+                                 int session_count, int session_pos, int studied,
+                                 int again, int good_or_better) {
+    if (!deck || !session_indices) return ESP_ERR_INVALID_ARG;
+    if (session_count < 0 || session_count > ANKI_SESSION_MAX) return ESP_ERR_INVALID_ARG;
+    if (session_pos < 0 || session_pos > session_count) return ESP_ERR_INVALID_ARG;
+    anki_resume_t r = {0};
+    memset(&r, 0, sizeof(r));  // 0xAA 约定：session_ids 未用槽恒 0
+    r.deck_id = deck->deck_id;
+    r.version = ANKI_STATE_VERSION;
+    r.root_tag = root_tag_of_deck(deck);
+    r.card_count = deck->card_count;
+    r.session_count = session_count;
+    r.session_pos = session_pos;
+    r.studied = studied;
+    r.again = again;
+    r.good_or_better = good_or_better;
+    r.day = effective_day(deck->day, deck->last_rtc_day);
+    r.fingerprint = deck_fingerprint(deck);
+    for (int i = 0; i < session_count; ++i) {
+        int idx = session_indices[i];
+        if (idx < 0 || idx >= deck->card_count) return ESP_ERR_INVALID_ARG;
+        r.session_ids[i] = deck->cards[idx].id;
+    }
+    uint8_t buf[ANKI_RESUME_BYTES];
+    resume_serialize(&r, buf);
+    char path[96] = {0};
+    state_path_for_deck(deck, path);
+    FILE* f = fopen(path, "wb");
+    if (!f) return ESP_FAIL;
+    size_t wrote = fwrite(buf, 1, sizeof(buf), f);
+    bool closed = fclose(f) == 0;
+    if (wrote != sizeof(buf) || !closed) {
+        ESP_LOGW(TAG, "resume state write truncated: %s", path);
+        return ESP_FAIL;
+    }
+    return ESP_OK;
+}
+
+void anki_store_resume_clear(int64_t deck_id) {
+    const char* roots[2];
+    anki_roots(&roots[0], &roots[1]);
+    for (int i = 0; i < 2; ++i) {
+        char path[96] = {0};
+        state_path_in(roots[i], deck_id, path);
+        if (unlink(path) != 0 && errno != ENOENT) {
+            ESP_LOGW(TAG, "resume clear %s failed (%d)", path, errno);
+        }
+    }
+}
+
+int anki_store_resume_indices(const anki_deck_t* deck, const anki_resume_t* r,
+                              int* out_indices, int max) {
+    if (!deck || !r || !out_indices || max <= 0) return 0;
+    memset(out_indices, 0, sizeof(int) * (size_t)max);  // 0xAA 约定：未用槽清零
+    int count = r->session_count;
+    if (count <= 0 || count > ANKI_SESSION_MAX || count > max) return 0;
+    for (int i = 0; i < count; ++i) {
+        bool found = false;
+        for (int k = 0; k < deck->card_count; ++k) {
+            if (deck->cards[k].id == r->session_ids[i]) {
+                out_indices[i] = k;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            memset(out_indices, 0, sizeof(int) * (size_t)max);
+            return 0;  // E8 静默降级：绝不展示错卡
+        }
+    }
+    return count;
+}
+
+void anki_store_resume_peek(int64_t deck_id, const char* root,
+                            int* out_pos, int* out_count) {
+    if (out_pos) *out_pos = 0;
+    if (out_count) *out_count = 0;
+    if (!out_pos || !out_count || !root) return;
+    char state_path[96] = {0};
+    state_path_in(root, deck_id, state_path);
+    anki_resume_t r = {0};
+    if (resume_read(state_path, &r) != ESP_OK) return;  // I4：静默置 0
+    if (r.deck_id != deck_id) return;
+    if (r.root_tag != root_tag_of_root(root)) return;  // E9
+    if (r.session_count <= 0 || r.session_count > ANKI_SESSION_MAX) return;
+    if (r.session_pos < 0 || r.session_pos >= r.session_count) return;
+    // 轻量绑定：读 .akd 头 64 B 校验卡数与日基准（E4 跨日 / E5 重导入）。
+    // 完整 fingerprint 与 session_ids 反查由 resume_load 兜底，列表页不重读整库。
+    // Lightweight binding: read only the 64 B .akd header for card count and
+    // day; the full fingerprint/session id checks stay in resume_load.
+    char deck_path[96] = {0};
+    deck_path_in(root, deck_id, deck_path);
+    FILE* f = fopen(deck_path, "rb");
+    if (!f) return;
+    uint8_t head[AKD_HEADER_BYTES];
+    memset(head, 0, sizeof(head));
+    size_t got = fread(head, 1, sizeof(head), f);
+    fclose(f);
+    if (got != sizeof(head) || memcmp(head, AKD_MAGIC, 4) != 0) return;
+    if (get_u32(head + AKD_OFF_VERSION) != AKD_VERSION) return;
+    int32_t card_count = (int32_t)get_u32(head + AKD_OFF_CARD_COUNT);
+    int64_t file_day = get_i64(head + AKD_OFF_DAY);
+    int64_t last_rtc = get_i64(head + AKD_OFF_LAST_RTC_DAY);
+    if (card_count != r.card_count) return;
+    if (effective_day(file_day, last_rtc) != r.day) return;
+    *out_pos = r.session_pos;
+    *out_count = r.session_count;
 }

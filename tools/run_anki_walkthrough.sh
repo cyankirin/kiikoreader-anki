@@ -39,10 +39,20 @@ flags=(-std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -g -fno-omit-frame-point
 if echo 'int main(void){return 0;}' | gcc -fsanitize=address,undefined -x c -o /dev/null - 2>/dev/null; then
     flags+=(-fsanitize=address,undefined)
 fi
-gcc "${flags[@]}" -Imain/anki -Imain/book -Imain -Itools/anki_stubs \
+# 可选：用 gen_anki_fixtures.py 生成的小夹具跑端到端时覆盖基准卡数；
+# 不设置时仍沿用仓库 QA 基准 1375 卡，CI/默认语义不变。
+# Optional: override the baseline card count for small gen_anki_fixtures.py
+# decks; the default (and CI behaviour) stays the 1375-card baseline.
+cards_flag=()
+if [ -n "${ANKI_WALKTHROUGH_CARDS:-}" ]; then
+    cards_flag=(-DANKI_WALKTHROUGH_CARDS="${ANKI_WALKTHROUGH_CARDS}")
+fi
+# 补链接 anki_progress.c：走查工具现在调用 anki_progress_export/restore。
+# Link anki_progress.c: the walkthrough now calls the export/restore API.
+gcc "${flags[@]}" "${cards_flag[@]}" -Imain/anki -Imain/book -Imain -Itools/anki_stubs \
     tools/anki_walkthrough.c \
     main/anki/anki_json.c main/anki/anki_sqlite.c main/anki/anki_apkg.c \
-    main/anki/anki_render.c main/anki/anki_store.c \
+    main/anki/anki_render.c main/anki/anki_store.c main/anki/anki_progress.c \
     main/book/zip_reader.c main/book/html_text.c \
     tools/anki_stubs/miniz_tinfl.c \
     -DANKI_DIR="\"build/anki-tests/walkthrough/anki\"" \

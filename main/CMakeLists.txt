@@ -321,6 +321,7 @@ kiiko_board_sources(kiiko_selected_sources "${CMAKE_CURRENT_LIST_DIR}" "app_main
         "anki/anki_apkg.c"
         "anki/anki_render.c"
         "anki/anki_store.c"
+        "anki/anki_progress.c"
         "book/book_layout.c"
         "book/gbk.c"
         "font/ttf_font.c"

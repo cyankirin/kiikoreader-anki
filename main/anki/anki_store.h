@@ -22,6 +22,12 @@
 #include "anki_apkg.h"
 #include "esp_err.h"
 
+/* 宿主替身 esp_err.h 未定义 ESP_ERR_INVALID_VERSION；真机 ESP-IDF 已定义。
+   / The host esp_err stub lacks ESP_ERR_INVALID_VERSION; ESP-IDF defines it. */
+#ifndef ESP_ERR_INVALID_VERSION
+#define ESP_ERR_INVALID_VERSION 0x10A
+#endif
+
 #ifndef ANKI_DIR
 #define ANKI_DIR "/flash/anki"
 #endif
@@ -38,6 +44,49 @@
 #define ANKI_DECK_FILE_MAX (6U * 1024U * 1024U)
 #define ANKI_SOURCE_PATH_MAX 256
 #define ANKI_SESSION_MAX 50
+
+/* .akd 既有字节布局：由 anki_store.c 的私有宏上提，值逐字不变，供
+   anki_progress.c 只读复用，避免两处漂移。/ Lifted .akd byte layout from
+   anki_store.c (values unchanged) so anki_progress.c can reuse it read-only. */
+#define AKD_MAGIC "AKD1"
+#define AKD_VERSION 1u
+#define AKD_HEADER_BYTES 64
+#define AKD_CARD_RECORD 52
+#define AKD_OFF_MAGIC 0
+#define AKD_OFF_VERSION 4
+#define AKD_OFF_DECK_ID 8
+#define AKD_OFF_DAY 16
+#define AKD_OFF_LAST_RTC_DAY 24
+#define AKD_OFF_CARD_COUNT 32
+#define AKD_OFF_NOTE_COUNT 36
+#define AKD_OFF_NOTETYPE_COUNT 40
+#define AKD_OFF_NAME_LEN 44
+#define AKD_OFF_SOURCE_LEN 48
+#define AKD_OFF_TABLE_AT 52
+#define AKD_OFF_HEADER_BYTES_FIELD 56
+#define AKD_OFF_RESERVED 60
+#define AKD_CARD_OFF_ID 0
+#define AKD_CARD_OFF_NID 8
+#define AKD_CARD_OFF_ORD 16
+#define AKD_CARD_OFF_TYPE 20
+#define AKD_CARD_OFF_QUEUE 24
+#define AKD_CARD_OFF_DUE 28
+#define AKD_CARD_OFF_IVL 32
+#define AKD_CARD_OFF_FACTOR 36
+#define AKD_CARD_OFF_REPS 40
+#define AKD_CARD_OFF_LAPSES 44
+#define AKD_CARD_OFF_RESERVED 48
+
+/* 续学状态 sidecar .aks：定长 512 B、显式小端序列化、不写进 .akd、
+   不升 AKD_VERSION。/ Resume sidecar: fixed 512 B, explicit little-endian
+   serialization, never inside .akd, AKD_VERSION stays 1. */
+#define ANKI_STATE_MAGIC "AKS1"
+#define ANKI_STATE_VERSION 1u
+#define ANKI_RESUME_BYTES 512u
+#define ANKI_STATE_SUFFIX ".aks"
+#define ANKI_ROOT_TAG_FLASH 0u
+#define ANKI_ROOT_TAG_TF 1u
+#define ANKI_FNV1A_BASIS 2166136261u
 
 /// 评分等级。/ Grade levels.
 typedef enum {
@@ -74,7 +123,39 @@ typedef struct {
     int total;
     int due;
     int fresh;
+    /* 尾部追加：0 = 无有效续学；既有宿主测试不受影响。/ Appended at the
+       tail: 0 means no valid resume state; existing host tests are unchanged. */
+    int resume_pos;
+    int resume_count;
 } anki_deck_summary_t;
+
+/// 已校验的续学状态快照（512 B .aks 的内存表示）。/ A validated resume snapshot.
+typedef struct {
+    int64_t deck_id;
+    uint32_t version;
+    uint32_t root_tag;
+    int card_count;
+    int session_count;
+    int session_pos;
+    int studied;
+    int again;
+    int good_or_better;
+    int64_t day;
+    uint32_t fingerprint;
+    int64_t session_ids[ANKI_SESSION_MAX];
+} anki_resume_t;
+
+/// FNV-1a 32，store 与 progress 共用；头文件内联，零链接依赖。
+/// FNV-1a 32 shared by store and progress; header-inline, no link dependency.
+static inline uint32_t anki_fnv1a(const void* data, size_t len, uint32_t seed) {
+    const uint8_t* p = (const uint8_t*)data;
+    uint32_t h = seed;
+    for (size_t i = 0; i < len; ++i) {
+        h ^= (uint32_t)p[i];
+        h *= 16777619u;
+    }
+    return h;
+}
 
 /// 导入一个 .apkg / 裸集合：按卡组分别落盘。out_imported 收到成功卡组数。
 /// 落盘根为当前活动根（TF 卡在位且可写 → /sdcard/anki，否则 /flash/anki）。
@@ -129,3 +210,32 @@ esp_err_t anki_store_delete(int64_t deck_id);
 
 /// 当前 Unix 日（UTC+8）；未对时返回 0。/ Current Unix day (UTC+8); 0 when time is unset.
 int64_t anki_day_now(void);
+
+/* ------------------------------------------------ 续学状态 .aks（新增 API） */
+
+/// 读并校验当前 deck 的续学状态；无效/损坏/跨日/绑定不符 → 非 ESP_OK 且 out 清零。
+/// Read and validate resume state; any binding mismatch leaves out zeroed.
+esp_err_t anki_store_resume_load(const anki_deck_t* deck, anki_resume_t* out);
+
+/// 由当前会话快照写 .aks（与 .akd 同根，512 B 整块一次写）；失败不致命。
+/// Persist a session snapshot to .aks (one 512 B write); failure is non-fatal.
+esp_err_t anki_store_resume_save(const anki_deck_t* deck,
+                                 const int* session_indices, int session_count,
+                                 int session_pos, int studied, int again,
+                                 int good_or_better);
+
+/// 清除两根下同 id 的 .aks；允许「无文件」；void，不阻塞。
+/// Clear .aks under both roots; a missing file is fine; never blocks.
+void anki_store_resume_clear(int64_t deck_id);
+
+/// 把已校验的 card_id 队列映射回当前 deck 的卡片下标；返回有效张数，
+/// 0 = 应重建（E8 静默降级）。/ Map the validated card_id queue back to deck
+/// card indices; 0 means rebuild (E8 silent degradation).
+int anki_store_resume_indices(const anki_deck_t* deck, const anki_resume_t* r,
+                              int* out_indices, int max);
+
+/// 轻量探测，仅供 anki_store_list 填 resume_pos/count；读失败静默置 0，
+/// 绝不返回错误、绝不阻塞列表（I4）。/ Lightweight probe for the list row;
+/// any failure silently yields 0 and never blocks the list (I4).
+void anki_store_resume_peek(int64_t deck_id, const char* root,
+                            int* out_pos, int* out_count);

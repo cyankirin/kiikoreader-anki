@@ -27,6 +27,26 @@ on-device; no Anki runtime, network or PC is required.
 5. 行内 **×** 删除已导入卡组（只删设备内的转换结果，不动 TF 卡上的 `.apkg`）。
    The in-row **×** deletes the imported deck (the converted copy only; the
    `.apkg` on the TF card is untouched).
+6. **断点续学**：学到一半离开（切页 / 锁屏 / 长按中键 / 掉电），下次点同一卡组
+   从上次那一张继续；卡组列表第二行显示 `续 N/M`。走到小结页、跨日、重新导入
+   同一卡组或删除卡组后，续学位置自动重置；写状态失败最多退化为「从头开始」，
+   逐卡进度不受影响。
+   Resume: leaving mid-session (page switch / lock / long-press / power loss)
+   returns to the exact card next time; the row shows `续 N/M`. Reaching the
+   summary, a day change, a re-import or a deletion resets it. A failed state
+   write only degrades to "start over"; per-card progress is unaffected.
+7. **导出进度**：点卡组行内的 **↑**，在当前活动根写出 `<卡组id>.akb`（人类可读
+   UTF-8 文本，含逐卡进度、日基准与续学状态，**不含卡片正文**）。TF 卡就绪时落
+   `/sdcard/anki`，否则落 `/flash/anki`；**无 TF 卡时导出与恢复依然可用**。
+   Export: tap the in-row **↑** to write `<deck_id>.akb` (readable UTF-8 with
+   per-card progress, the day base and resume state, **no card text**) under
+   the active root. Export and restore work without a TF card.
+8. **恢复进度**：点底栏 **恢复** → 选择 `.akb` → 二次确认（会覆盖该卡组进度与
+   日基准，不可撤销）→ 显示「覆盖 N 张 / 跳过 M 张」。恢复前提是设备上已有
+   同一 `deck_id` 的卡组。
+   Restore: tap the bottom-bar **恢复**, pick a `.akb`, confirm (overwrites this
+   deck's progress and day base, irreversible), then see "covered N / skipped M".
+   The deck with the same `deck_id` must already exist on the device.
 
 按键与手势 / Keys and gestures：
 
@@ -74,7 +94,8 @@ template script:
 | `main/anki/anki_json.h/.c` | 最小 JSON 解析器：v2 `col.models/decks` 与 v3 模板配置。Minimal JSON parser for v2 col JSON and v3 template configs. |
 | `main/anki/anki_apkg.h/.c` | `.apkg`/裸库导入：ZIP 取集合库，v2/v3 schema 解析为内存模型；跳过挂起卡与过滤卡组。Import: pulls the collection out of the ZIP, parses v2/v3 schemas into a model; skips suspended cards and filtered decks. |
 | `main/anki/anki_render.h/.c` | 模板渲染：字段替换、`{{#}}/{{^}}` 条件段、cloze、hint、`{{FrontSide}}`，HTML 转纯文本复用 `html_to_blocks`。Template rendering: fields, conditional sections, cloze, hint, FrontSide; HTML-to-text reuses html_to_blocks. |
-| `main/anki/anki_store.h/.c` | 设备存储：`/flash/anki/<卡组id>.akd` 定长记录、日计数同步、会话队列、简化 SM-2、进度原地更新。Storage: fixed-record `.akd` files, day-counter sync, session queue, simplified SM-2, in-place progress patching. |
+| `main/anki/anki_store.h/.c` | 设备存储：`/flash/anki/<卡组id>.akd` 定长记录、日计数同步、会话队列、简化 SM-2、进度原地更新；另有独立 sidecar `<卡组id>.aks`（定长 512 B）保存续学队列与游标。Storage: fixed-record `.akd`, day-counter sync, session queue, simplified SM-2, in-place progress patching, plus a 512 B `<deck_id>.aks` resume sidecar. |
+| `main/anki/anki_progress.h/.c` | 进度备份：`.akb` 行式 UTF-8 读写、导出 `tmp + rename`、恢复整文件事务（`.akd.tmp` + `.akd.bak` 双文件提交）、两根扫描去重、按 `card_id` 快速/宽松两阶段匹配与启动自愈。Progress backup: `.akb` line text I/O, tmp+rename export, whole-file restore transaction, dual-root enumeration, fast/loose `card_id` matching and startup recovery. |
 | `main/apps/app_anki.c` | 页面：卡组列表、文件选择、导入、学习会话与小结。Page: deck list, file picker, import, study session and summary. |
 | `main/apps/anki_layout.h` | 学习页排版单元：折行、避头尾、选项悬挂缩进与自适应字号；纯逻辑，字宽与字体度量由外部函数注入，设备与宿主探针共用同一份代码。Layout unit: wrapping, CJK break rules, option hanging indents and the adaptive type size; pure logic with the widths and font metrics injected, so the device and the host probe share one implementation. |
 | `main/app/app_registry.c` | 菜单注册（追加一项，不动其它页）。Menu registration (one appended entry). |
@@ -116,6 +137,36 @@ template script:
 - v1 调度器的复习 due 按集合创建日重映射；v2/v3 按 Unix 日重映射。
   v1-scheduler review dues are remapped from the collection creation day; v2/v3
   from Unix days.
+- **续学状态**存独立 sidecar `<卡组id>.aks`：定长 512 B、magic `AKS1`、格式版本 1、
+  显式小端序列化、FNV-1a 校验和覆盖 `[16,512)`；与 `.akd` 同目录同根，**不写进
+  `.akd`、不升 `AKD_VERSION`**，设备上已有的 v1 `.akd` 零迁移、零重导入。每次评分后
+  整块覆盖写一次；写失败最多退化为「从头开始」，逐卡进度完好。
+  Resume state lives in a 512 B `<deck_id>.aks` sidecar (`AKS1`, version 1,
+  explicit little-endian bytes, FNV-1a over `[16,512)`), next to `.akd` under
+  the same root. It never touches `.akd` or bumps `AKD_VERSION`, so existing v1
+  decks need no migration. One whole-block write per grade; failure degrades to
+  "start over" and never harms per-card progress.
+- **进度备份** `<卡组id>.akb` 为行式 UTF-8 纯文本，格式版本 `akb_version=1`：
+  KV 头（含 `deck_id` / `day` / `last_rtc_day` / `card_count` / `ext1` / `ext2`）
+  + `C` 卡表段（逐卡 7 个调度字段）+ 可选 `R`/`Q` 续学段 + `END` + `SUM`（对全部
+  `C` 行的 FNV-1a 32）。**不含**卡片正文 / 笔记 / 模板 / 图片。单行上限 192 B、
+  整文件上限 2 MiB；导出用 `tmp + rename` 原子落成一个文件，失败不留半截文件。
+  Progress backup `<deck_id>.akb` is line-oriented UTF-8 (`akb_version=1`):
+  a KV header, a `C` card table (7 scheduling fields per card), optional `R`/`Q`
+  resume rows, `END` and a `SUM` FNV-1a over all `C` rows. No card text, notes,
+  templates or media. Lines are capped at 192 B and the file at 2 MiB; export
+  commits one file via tmp+rename and leaves no half-file on failure.
+- **恢复上限**：备份 `C` 段超过 `ANKI_RESTORE_CARD_MAX = 20000` 张时拒绝恢复并提示
+  「卡组过大，暂不支持恢复」，设备进度不变。卡组存在但卡片集合不一致时按 `card_id`
+  逐条匹配覆盖，对不上的跳过并汇总，绝不整库盲覆盖。恢复同时把备份的 `day` 与
+  `last_rtc_day` 写回 `.akd` 头部（@16 / @24），否则换机 / 重刷后新设备 `day=0`
+  会让复习卡永远不到期；除这两个头字段与卡片表 7 个调度字段外，其余字节逐字节不变。
+  Restore rejects backups above `ANKI_RESTORE_CARD_MAX = 20000` with a clear
+  hint and leaves the device untouched. Mismatched card sets are merged by
+  `card_id`, never blind-overwritten. The backup `day`/`last_rtc_day` are also
+  written back into the `.akd` header (@16 / @24); without that a fresh device
+  with `day=0` would make review cards permanently not-due. Every other byte
+  stays identical.
 
 ## 已知限制 / Known limits
 
@@ -138,6 +189,27 @@ template script:
   2px); the measured ink of the text and the font design metrics are combined
   so neighbouring lines never overlap, and the pitch follows any font or size
   change.
+
+- **备份不是卡组包**：`.akb` 只有进度，不能凭空创建卡组。恢复前提是设备上已有
+  同一 `deck_id` 的卡组（先导入原 `.apkg`）；卡片正文 / 模板 / 卡组名始终不变。
+  A backup is not a deck package: the same-`deck_id` deck must already exist
+  on the device (import the original `.apkg` first); card text, templates and
+  the deck name are never altered.
+- **不实现「无 TF 卡禁用」**：导出与恢复统一走 `anki_store_active_root()`（TF 就绪 →
+  `/sdcard/anki`，否则 `/flash/anki`），未插 TF 卡时照常可用；`/flash/anki` 下的
+  `.akb` 可经设备 **USB 存储模式** 连接电脑取出，不需要 TF 卡。恢复选文件会同时
+  扫描两个根并按文件名去重（活动根优先），由用户挑，不自动选最新。
+  No TF-card gating: export/restore always use `anki_store_active_root()`;
+  `/flash/anki` backups can be copied off through the device's **USB storage
+  mode**. Restore lists files from both roots, deduplicated by filename
+  (active root first); the user picks, nothing is auto-selected.
+- **日基准随进度恢复**：二次确认已写明会一并恢复日基准且不可撤销；无 RTC 设备日
+  计数不推进，续学状态不因时间失效。恢复中途失败或掉电由启动时自愈回到完整旧
+  或完整新文件，绝不产出混合态。
+  The day base is restored together with progress (stated in the confirmation);
+  without an RTC the day counter holds, so resume state does not time out. A
+  failed or interrupted restore self-heals at startup to either the complete
+  old or the complete new file, never a mixture.
 
 ## 测试 / Tests
 
