@@ -1636,12 +1636,16 @@ static void test_qa_resume_peek(void) {
 
     /* 绑定不符（card_count / 跨日）→ peek 静默置 0。
        / Binding mismatches (card_count / day) also yield 0. */
+    /* qa_prepare 会重新载入整库：先释放上一次的 PSRAM 数组，否则 ASan 报泄漏。
+       / qa_prepare reloads the whole deck; release the previous arrays first. */
+    anki_store_unload(&deck);
     CHECK(qa_prepare(&id, &deck, idx, &cnt));
     qa_aks_path(ANKI_DIR, id, aks, sizeof(aks));
     qa_aks_set_u32(aks, 28, 4u, true);
     qa_peek_t bad2 = qa_peek_list(id);
     CHECK(bad2.decks == 2 && bad2.pos == 0 && bad2.count == 0);
 
+    anki_store_unload(&deck);
     CHECK(qa_prepare(&id, &deck, idx, &cnt));
     qa_akd_path(ANKI_DIR, id, akd, sizeof(akd));
     {
