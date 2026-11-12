@@ -968,9 +968,9 @@ int main(void) {
     clear_selection();toggle_selection(0);toggle_selection(14);
     char identity0[288],identity1[288];strcpy(identity0,s_shelf[0].path);strcpy(identity1,s_shelf[14].path);
     EpdRect menu=bulk_filter_rect(1);assert(bulk_action(&ctx,menu.x+10,menu.y+10)==APP_REDRAW_PAGE&&s_sort_menu);
-    for(int mode=0;mode<3;++mode)for(int desc=0;desc<2;++desc){
+    for(int mode=0;mode<4;++mode)for(int desc=0;desc<2;++desc){/*rc107 误收窄为 mode<3 且把升降序键 rect(5)/rect(4) 误写成 rect(4)/rect(3)*/
         EpdRect choice=bulk_sort_rect(mode);bulk_action(&ctx,choice.x+5,choice.y+5);
-        choice=bulk_sort_rect(desc?4:3);bulk_action(&ctx,choice.x+5,choice.y+5);
+        choice=bulk_sort_rect(desc?5:4);bulk_action(&ctx,choice.x+5,choice.y+5);
         assert(selected_count()==2&&shelf_order_mode()==mode&&shelf_order_desc()==(bool)desc);
         int found=0;for(int i=0;i<s_count;++i)if(s_shelf[i].selected){assert(!strcmp(s_shelf[i].path,identity0)||!strcmp(s_shelf[i].path,identity1));++found;}assert(found==2);
     }
