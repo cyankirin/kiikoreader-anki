@@ -197,10 +197,9 @@ int main(int argc, char** argv) {
     CHECK(imp.note_count > 0);
     CHECK(imp.notetype_count > 0);
 
-    /* 选择题检测：正确选项行与「答案：X」行带 \x01 粗体标记，错误项
-       保持常规黑字。
-       / Choice model detection: correct option lines and the answer line
-         carry the \x01 bold marker while wrong options stay plain black. */
+    /* 选择题检测：新语义下错误选项行带 \x01，正确项与「答案：X」行不带。
+       / Choice model detection: under the new semantics wrong option lines
+          carry \x01 while correct options and the answer line do not. */
     anki_collection_t col;
     anki_collection_from_import(&imp, &col);
     int choice_cards = 0;
@@ -213,19 +212,17 @@ int main(int argc, char** argv) {
     for (int i = 0; i < imp.card_count; ++i) {
         if (anki_render_front(&col, &imp.cards[i], front, sizeof(front)) != ESP_OK) continue;
         if (anki_render_back(&col, &imp.cards[i], front, back, sizeof(back)) != ESP_OK) continue;
-        int options = 0, marked = 0, option_marks = 0;
+        int options = 0, marked = 0;
         for (const char* p = back; *p;) {
             const char* nl = strchr(p, '\n');
             const size_t len = nl ? (size_t)(nl - p) : strlen(p);
-            const bool bold = len > 0 && p[0] == '\x01';
-            const char* body = bold ? p + 1 : p;
-            const size_t blen = len - (bold ? 1u : 0u);
-            const bool is_option = blen >= 3 && body[0] >= 'A' && body[0] <= 'Z' &&
-                                   body[1] == '.' && body[2] == ' ';
-            if (is_option) ++options;
-            if (bold) ++marked;
-            if (is_option && bold) ++option_marks;
-            if (blen >= 9 && strncmp(body, "答案：", 9) == 0 && bold) ++answer_marked;
+            const bool inv = len > 0 && p[0] == '\x01';
+            const char* body = inv ? p + 1 : p;
+            const size_t blen = len - (inv ? 1u : 0u);
+            if (blen >= 3 && body[0] >= 'A' && body[0] <= 'Z' && body[1] == '.' && body[2] == ' ')
+                ++options;
+            if (inv) ++marked;
+            if (blen >= 9 && strncmp(body, "答案：", 9) == 0 && inv) ++answer_marked;
             if (!nl) break;
             p = nl + 1;
         }
@@ -233,20 +230,17 @@ int main(int argc, char** argv) {
         ++choice_cards;
         option_total += options;
         marked_total += marked;
-        // 标记落在正确项上，答案行另算，所以正确项数 = 带标记的选项行数。
-        // Marked lines are the correct options; the answer line is counted
-        // separately, so correct == marked option lines.
-        const int correct = option_marks;
+        const int correct = options - marked;
         if (correct >= 2) ++multi_choice_cards;
         else if (correct == 1) ++single_choice_cards;
     }
-    printf("choice backs: cards=%d single=%d multi=%d options=%d bold-marked=%d answer-marked=%d\n",
+    printf("choice backs: cards=%d single=%d multi=%d options=%d wrong-marked=%d answer-marked=%d\n",
            choice_cards, single_choice_cards, multi_choice_cards, option_total, marked_total,
            answer_marked);
     CHECK(choice_cards > 0);
     CHECK(single_choice_cards > 0);
     CHECK(multi_choice_cards > 0);
-    CHECK(answer_marked > 0); /* 答案陈述必须黑色加粗 / the answer must draw black bold */
+    CHECK(answer_marked == 0); /* 答案陈述必须保持可读 / the answer stays readable */
 
     /* ---------- 2. 落盘导入 / on-disk import ---------- */
     clean_dir(ANKI_DIR);
@@ -286,19 +280,19 @@ int main(int argc, char** argv) {
         .notes = deck.notes,
         .note_count = deck.note_count,
     };
-    int rendered = 0, bold_lines = 0;
+    int rendered = 0, invert_lines = 0;
     for (int i = 0; i < count; ++i) {
         const anki_card_t* card = &deck.cards[session[i]];
         if (anki_render_front(&dcol, card, front, sizeof(front)) != ESP_OK) continue;
         if (anki_render_back(&dcol, card, front, back, sizeof(back)) != ESP_OK) continue;
         if (front[0] && back[0]) {
             ++rendered;
-            /* 加粗行数 = 正确选项行 + 答案行。/ Bold lines = correct options plus the answer. */
-            for (const char* p = back; (p = strchr(p, '\x01')) != NULL; ++p) ++bold_lines;
+            /* 反色行数 = 错误选项行数。/ Inverted lines = wrong option lines. */
+            for (const char* p = back; (p = strchr(p, '\x01')) != NULL; ++p) ++invert_lines;
         }
     }
-    printf("rendered: %d/%d session cards, %d bold (correct option / answer) lines\n", rendered, count,
-           bold_lines);
+    printf("rendered: %d/%d session cards, %d inverted (wrong option) lines\n", rendered, count,
+           invert_lines);
     CHECK(rendered == count);
 
     /* ---------- 7. 评分并持久化 / grade and persist ---------- */

@@ -35,39 +35,25 @@ static int checks;
 
 /* ---- 假实现：探针替掉排版单元的外部依赖 --------------------------------- */
 
-// 假字重状态：TTF 的 wght 轴在 700 时会改变 advance，探针用「每字符 +1px」
-// 模拟，这样粗体段是否真的按 700 测量、测完是否恢复，都能被断言抓到。
-// Fake weight state: the real TTF wght axis changes advances at 700, so the
-// probe charges +1px per character to make bold measurement observable.
-static int s_fake_weight = 300;
-static bool s_fake_builtin = false;
-static int s_bold_measure_calls = 0;
-int ttf_get_weight(void) { return s_fake_weight; }
-void ttf_set_weight(int wght) { s_fake_weight = wght; }
-bool ui_text_uses_builtin(const char* text) { (void)text; return s_fake_builtin; }
-
-// 确定性假测量：CJK 与 emoji 宽 = px，ASCII 宽 = px/2；粗体字重下每字符 +1。
-// Deterministic fake measure: CJK and emoji take px, ASCII takes px/2, plus
-// one pixel per character while the bold weight is active.
+// 确定性假测量：CJK 与 emoji 宽 = px，ASCII 宽 = px/2。
+// Deterministic fake measure: CJK and emoji take px, ASCII takes px/2.
 int ui_text_fixed_width_px(int px, const char* text) {
     if (!text || !*text || px <= 0) return 0;
     const size_t len = strlen(text);
-    const int extra = s_fake_weight >= ANKI_BOLD_WGHT ? 1 : 0;
-    if (extra) ++s_bold_measure_calls;
     int width = 0;
     for (size_t i = 0; i < len;) {
         const unsigned char c = (unsigned char)text[i];
         if (c < 0x80) {
-            width += px / 2 + extra;
+            width += px / 2;
             ++i;
         } else if ((c & 0xE0) == 0xC0 && i + 1 < len) {
-            width += px + extra;
+            width += px;
             i += 2;
         } else if ((c & 0xF0) == 0xE0 && i + 2 < len) {
-            width += px + extra;
+            width += px;
             i += 3;
         } else if ((c & 0xF8) == 0xF0 && i + 3 < len) {
-            width += px + extra;
+            width += px;
             i += 4;
         } else {
             // 截断的多字节字符按一个字宽计一次，并跳过它的续行字节：
@@ -75,7 +61,7 @@ int ui_text_fixed_width_px(int px, const char* text) {
             // A truncated multi-byte character counts as one character and its
             // continuation bytes are skipped: a real font measures half a
             // character as one glyph, so the probe must not charge twice.
-            width += px + extra;
+            width += px;
             ++i;
             while (i < len && ((unsigned char)text[i] & 0xC0) == 0x80) ++i;
         }
@@ -202,7 +188,7 @@ static const char* line_text(int i, char* buf, size_t cap) {
 
 // 分类函数逐码点直接断言：漏一个码点或整体取反都要被抓到。
 // Direct per-codepoint assertions on the classifiers: a dropped code point
-// or a flipped table must be caught.
+// or an inverted table must be caught.
 static void check_classifiers(void) {
     printf("== classifiers ==\n");
     CHECK(cjk_closing(0x3002));  // 。
@@ -256,10 +242,10 @@ static void check_lines(const char* name) {
         CHECK(!in_table(k_closing, sizeof(k_closing) / sizeof(k_closing[0]), head));
         CHECK(!in_table(k_opening, sizeof(k_opening) / sizeof(k_opening[0]), tail));
         const int indent = g_layout.line_x[i];
-        const int line_width = seg_measure_px(g_layout.text_px, buf, g_layout.line_bold[i]);
+        const int line_width = ui_text_fixed_width_px(g_layout.text_px, buf);
         CHECK(line_width + indent <= width);
-        printf("   [%02d] off=%3zu len=%3zu bold=%d x=%3u w=%3d | %s\n", i,
-               g_layout.line_off[i], g_layout.line_len[i], (int)g_layout.line_bold[i],
+        printf("   [%02d] off=%3zu len=%3zu inv=%d x=%3u w=%3d | %s\n", i,
+               g_layout.line_off[i], g_layout.line_len[i], (int)g_layout.line_invert[i],
                (unsigned)indent, line_width, buf);
     }
     // 墨迹不重叠：pitch ≥ below(上行) + above(下行)，用探针自己的墨迹模型算。
@@ -288,7 +274,6 @@ static void check_option_indents(void) {
     while (seg_start < len) {
         size_t seg_end = seg_start;
         while (seg_end < len && text[seg_end] != '\n') ++seg_end;
-        const bool bold = seg_start < seg_end && text[seg_start] == '\x01';
         size_t p = seg_start;
         if (p < seg_end && text[p] == '\x01') ++p;
         const bool is_option = p + 2 < seg_end && text[p + 1] == '.' && text[p + 2] == ' ' &&
@@ -297,7 +282,7 @@ static void check_option_indents(void) {
         if (is_option) {
             char prefix[4] = {text[p], '.', ' '};
             prefix[3] = 0;
-            const int expect = seg_measure_px(g_layout.text_px, prefix, bold);
+            const int expect = ui_text_fixed_width_px(g_layout.text_px, prefix);
             int seen = 0;
             for (int i = 0; i < g_layout.line_count; ++i) {
                 const size_t off = g_layout.line_off[i];
@@ -390,20 +375,21 @@ static void case_option_hanging(void) {
     for (int i = 0; i < g_layout.line_count; ++i) if (g_layout.line_x[i] > 0) ++indented;
     CHECK(indented >= 1);
     CHECK(g_layout.line_x[0] == 0);
-    CHECK(g_layout.line_bold[0]);
+    CHECK(g_layout.line_invert[0]);
 }
 
 static void case_choice_back(void) {
     printf("== case: choice back layout ==\n");
     layout("我国依法负责对业余无线电台实施监督管理的机构是：\n"
            "\n"
-           "\x01"
            "A. 国家无线电管理机构和省、自治区、直辖市无线电管理机构\n"
+           "\x01"
            "B. 在国家或地方民政部门注册的业余无线电协会\n"
+           "\x01"
            "C. 国家体育管理机构和地方体育管理机构\n"
+           "\x01"
            "D. 国家和地方公安部门\n"
            "\n"
-           "\x01"
            "答案：A\n",
            true);
     check_lines("choice-back");
@@ -415,30 +401,30 @@ static void case_choice_back(void) {
     int blanks = 0;
     for (int i = 0; i < g_layout.line_count; ++i) if (g_layout.line_len[i] == 0) ++blanks;
     CHECK(blanks == 2);
-    // 正确项（A）与答案行带标记加粗，错误项（B/C/D）保持常规黑字。
-    // The correct option and the answer are bold; the wrong ones stay plain.
+    // 正确项（A）与答案行不带标记，错误项（B/C/D）带标记。
+    // The correct option and the answer carry no marker; the wrong ones do.
     char buf[ANKI_LINE_BUF];
     int correct_marks = 0, wrong_marks = 0, answer_marks = 0, answer_seen = 0;
     for (int i = 0; i < g_layout.line_count; ++i) {
         line_text(i, buf, sizeof(buf));
         if (!buf[0]) continue;
-        // 标记字节在折行时已被摘掉，行内容就是可见文本（标记不占宽度）。
+        // 标记字节在折行时已被摘掉，行内容就是可见文本。
         // The marker byte is dropped during wrapping, so the line content is
-        // the visible text: the marker takes no display width.
+        // the visible text.
         if (buf[0] == 'A' && buf[1] == '.' && buf[2] == ' ') {
-            correct_marks += g_layout.line_bold[i] ? 1 : 0;
+            correct_marks += g_layout.line_invert[i] ? 1 : 0;
         } else if (buf[0] >= 'B' && buf[0] <= 'D' && buf[1] == '.' && buf[2] == ' ') {
-            wrong_marks += g_layout.line_bold[i] ? 1 : 0;
+            wrong_marks += g_layout.line_invert[i] ? 1 : 0;
         }
         if (strncmp(buf, "答案：", 9) == 0) {
             ++answer_seen;
-            answer_marks += g_layout.line_bold[i] ? 1 : 0;
+            answer_marks += g_layout.line_invert[i] ? 1 : 0;
         }
     }
-    CHECK(correct_marks == 1);
-    CHECK(wrong_marks == 0);
+    CHECK(correct_marks == 0);
+    CHECK(wrong_marks == 3);
     CHECK(answer_seen == 1);
-    CHECK(answer_marks == 1);
+    CHECK(answer_marks == 0);
 }
 
 // 折行要能放就放：整段的空白总量要小（避头尾最多留一个字的空）。
@@ -457,8 +443,7 @@ static void case_fill(void) {
         line_text(i, buf, sizeof(buf));
         if (!buf[0]) continue;
         ++lines;
-        const int used = seg_measure_px(g_layout.text_px, buf, g_layout.line_bold[i]) +
-                         g_layout.line_x[i];
+        const int used = ui_text_fixed_width_px(g_layout.text_px, buf) + g_layout.line_x[i];
         if (used < width) slack += width - used;
     }
     printf("   lines=%d slack=%d avg=%d (one char = %d px) pages=%d\n", lines, slack,
@@ -508,90 +493,45 @@ static void case_adaptive_size(void) {
     CHECK(g_layout.text_px == ANKI_MIN_BODY_PX);
 }
 
-// 粗体标记随折行传播：整段（首行 + 全部续行）都加粗，且不泄漏到下一段。
-// The bold marker follows the wrap: the whole segment (first line and
-// every continuation) is bold, and it never leaks into the next segment.
+// 反色标记随折行传播：整段（首行 + 全部续行）都反色，且不泄漏到下一段。
+// The emphasis marker follows the wrap: the whole segment (first line and
+// every continuation) is inverted, and it never leaks into the next segment.
 static void case_emphasis_wrap(void) {
-    printf("== case: bold across wrapped lines ==\n");
-    // 1) 加粗长选项：折成多行，每一行都要加粗。
-    // A marked long option wrapping over several lines: every line is bold.
+    printf("== case: emphasis across wrapped lines ==\n");
+    // 1) 反色长选项：折成多行，每一行都要反色。
+    // A marked long option wrapping over several lines: every line inverted.
     layout("\x01"
            "B. 在国家或地方民政部门注册的业余无线电协会，这一行足够长，必然折成三行以上才放得下。",
            false);
-    check_lines("bold-wrapped");
+    check_lines("emphasis-wrapped");
     printf("   lines=%d\n", g_layout.line_count);
     CHECK(g_layout.line_count >= 3);
-    for (int i = 0; i < g_layout.line_count; ++i) CHECK(g_layout.line_bold[i]);
+    for (int i = 0; i < g_layout.line_count; ++i) CHECK(g_layout.line_invert[i]);
 
-    // 2) 无粗体标记的长段：每一行都不加粗（防止改反）。
-    // A long segment with no marker: no line is bold (guards a reversed fix).
+    // 2) 无反色标记的长段：每一行都不反色（防止改反）。
+    // A long segment with no marker: no line is inverted (guards a reversed fix).
     layout("我国依法负责对业余无线电台实施监督管理的机构是国家无线电管理机构和省、自治区、"
            "直辖市无线电管理机构，这一行同样足够长，必然折行显示。",
            false);
     check_lines("plain-wrapped");
     CHECK(g_layout.line_count >= 3);
-    for (int i = 0; i < g_layout.line_count; ++i) CHECK(!g_layout.line_bold[i]);
+    for (int i = 0; i < g_layout.line_count; ++i) CHECK(!g_layout.line_invert[i]);
 
-    // 3) 加粗段后面紧跟普通段：前者全行加粗，后者不加粗（段落隔离）。
-    // 用备注行做普通段，因为答案行现在也带标记加粗。
-    // A bold segment followed by a plain one: the former is bold on every
-    // line, the latter on none. A note line is the plain segment here,
-    // since the answer line is bold too.
+    // 3) 反色段后面紧跟普通段：前者全行反色，后者不反色（段落隔离）。
+    // A marked segment followed by a plain one: the former is inverted on every
+    // line, the latter on none (the marker stays inside its segment).
     layout("\x01"
            "B. 在国家或地方民政部门注册的业余无线电协会，这一行足够长，必然折成三行以上才放得下。\n"
-           "备注：B\n",
+           "答案：B\n",
            false);
-    check_lines("bold-then-plain");
+    check_lines("emphasis-then-plain");
     const int last = g_layout.line_count - 1;
     CHECK(last >= 3);
-    for (int i = 0; i < last; ++i) CHECK(g_layout.line_bold[i]);
-    CHECK(!g_layout.line_bold[last]);
+    for (int i = 0; i < last; ++i) CHECK(g_layout.line_invert[i]);
+    CHECK(!g_layout.line_invert[last]);
     char tail[ANKI_LINE_BUF];
     line_text(last, tail, sizeof(tail));
-    CHECK(strcmp(tail, "备注：B") == 0);
-}
-
-// 两个坑的可测性：粗体段必须按 700 测量、测完恢复；内建字体降级也要有
-// 确定的宽度口径，且两条路径都不把字重泄漏到后续页面。
-// Testability of the two pitfalls: bold segments measure at 700 and restore
-// afterwards; the built-in face has a deterministic fallback width and also
-// leaves no weight behind.
-static void case_bold_measure(void) {
-    printf("== case: bold measurement and built-in fallback ==\n");
-    const char* marked =
-        "\x01"
-        "A. 正确答案是这一项，正文足够长以便折成多行，检验粗体段的测量口径。";
-    // 1) TTF 分支：粗体段测量确实切到 700（假字宽每字符 +1），排版后恢复 300。
-    s_fake_builtin = false;
-    s_fake_weight = 300;
-    s_bold_measure_calls = 0;
-    layout(marked, true);
-    CHECK(s_bold_measure_calls > 0);
-    CHECK(s_fake_weight == 300);
-    CHECK(g_layout.line_bold[0]);
-    char buf[ANKI_LINE_BUF];
-    line_text(0, buf, sizeof(buf));
-    CHECK(buf[0] == 'A');  // \x01 被吃掉，不占显示宽度
-    check_lines("bold-ttf");
-    CHECK(s_fake_weight == 300);  // 宽度核对也不能把字重留到下一页
-
-    // 2) 内建位图字体：不切字重，改用 +1 的双描边宽度；同样不留残留。
-    s_fake_builtin = true;
-    s_fake_weight = 300;
-    s_bold_measure_calls = 0;
-    layout(marked, true);
-    CHECK(s_fake_weight == 300);
-    CHECK(g_layout.line_bold[0]);
-    check_lines("bold-builtin");
-    CHECK(s_fake_weight == 300);
-
-    // 3) 普通段不受影响：非粗体段不会触发 700 测量。
-    s_bold_measure_calls = 0;
-    layout("我国依法负责对业余无线电台实施监督管理的机构是国家无线电管理机构。", false);
-    CHECK(s_bold_measure_calls == 0);
-    for (int i = 0; i < g_layout.line_count; ++i) CHECK(!g_layout.line_bold[i]);
-    CHECK(s_fake_weight == 300);
-    s_fake_builtin = false;
+    CHECK(strcmp(tail, "答案：B") == 0);
 }
 
 int main(void) {
@@ -608,7 +548,6 @@ int main(void) {
     case_emphasis_wrap();
     case_fill();
     case_adaptive_size();
-    case_bold_measure();
     if (failures) {
         printf("anki_layout_probe: FAIL (%d of %d checks)\n", failures, checks);
         return 1;

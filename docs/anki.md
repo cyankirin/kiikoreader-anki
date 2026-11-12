@@ -78,18 +78,11 @@ template script:
   blank line and one `<letter>. <text>` line per option. Letters that only
   lived in `id` attributes and hidden items such as `<li class="hidden">`
   never reach the text.
-- **背面 / Back**：同正面，再加空行、正确答案与正确选项**黑色加粗**
-  （错误选项保持常规黑字；折行时整段加粗）、`答案：X` 与 `备注：`
-  （注释字段非空时）。**全部行一律黑字，反色（黑底白字）方案已弃用**——
-  墨水屏看不到彩色，白字反色反而难读；加粗由 TTF 字重 700 实现，
-  内建位图字体无字重轴时降级为水平 1px 双描边。
-  The same plus a blank line, **black bold** on the correct options and the
-  answer (wrong options keep ordinary black ink; a wrapped option stays bold
-  on every line), `答案：X` and `备注：` when the note field is set. **Every
-  line is black and the old inverted (white-on-black) emphasis is gone** —
-  e-paper shows no colour and white-on-black is harder to read. Bold uses a
-  TTF weight of 700; the built-in bitmap face has no weight axis and
-  degrades to a 1px horizontal double strike.
+- **背面 / Back**：同正面，再加空行、错项反色（正确项保持常规黑字；折行时整段反色）、
+  `答案：X` 与 `备注：`（注释字段非空时）。
+  The same plus a blank line, inverted wrong options (correct ones keep
+  ordinary black ink; a wrapped option stays inverted on every line),
+  `答案：X` and `备注：` when the note field is set.
 - 其余卡组继续走模板路径，行为不变。
   Every other deck keeps the template path unchanged.
 
@@ -241,14 +234,8 @@ and persist eight cards, reload and verify, then delete — as a cross-module
 regression check that runs off-device.
 
 排版探针覆盖：禁则（行首不落闭符号、行尾不落开符号）、选项续行的悬挂缩进、
-每行的宽度上限与利用率、相邻两行的墨迹不重叠、以及过长正文缩到 16px 下限；
-另验证粗体标记整段继承、不占显示宽度，粗体段按与绘制相同的字重测量且
-测完恢复，内建字体降级也不把字重泄漏到后续页面。
+每行的宽度上限与利用率、相邻两行的墨迹不重叠、以及过长正文缩到 16px 下限。
 The layout probe covers the break rules (no closing mark at a line head, no
 opening mark at a line tail), the hanging indent of option continuations, the
 per-line width budget and fill, the no-overlap invariant between neighbouring
-lines, and the shrink to the 16px floor for overlong bodies. It also checks
-that the bold marker is inherited by the whole wrapped segment without taking
-display width, that bold segments are measured at the same weight used for
-drawing and restore it afterwards, and that the built-in-face fallback leaks
-no weight into later pages.
+lines, and the shrink to the 16px floor for overlong bodies.

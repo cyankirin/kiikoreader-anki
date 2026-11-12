@@ -53,22 +53,6 @@ void ui_font_measure_line_px(int px, const char* text, int* above, int* below);
 int ttf_ascender_px(int px);
 int ttf_descender_px(int px);
 
-/// 粗体行字重：与 app_reading 的 READING_BOLD_WGHT 一致，TTF 的 wght 轴
-/// 在此值下加粗。/ Bold weight for marked lines, matching app_reading's
-/// READING_BOLD_WGHT; the TTF wght axis thickens glyphs at this value.
-#define ANKI_BOLD_WGHT 700
-
-/// 外部依赖补充：字体分支与字重切换。粗体段测量时临时切到 ANKI_BOLD_WGHT
-/// 并测完恢复，让折行宽度与绘制用同一字重；内建位图字体没有 wght 轴，
-/// 排版层改用水平 1px 双描边降级（宽度 +1），两者口径一致。
-/// Extra external dependencies: face selection and the weight switch. Bold
-/// segments are measured at ANKI_BOLD_WGHT and restored afterwards so wrap
-/// and draw share one weight; the built-in bitmap face has no wght axis and
-/// degrades to a 1px horizontal double strike (+1 to the measured width).
-bool ui_text_uses_builtin(const char* text);
-int ttf_get_weight(void);
-void ttf_set_weight(int wght);
-
 /// 内容区：首行上沿、内容下边界，以及底部提示行/评分按钮各占多高。屏幕尺寸
 /// 是界面的事，排版单元只吃这四个数，宿主探针因此不必依赖 ui_kit.h。
 /// The content band: where the first line starts, where the content ends and
@@ -89,7 +73,7 @@ typedef struct {
     const char* text;                      ///< 当前文本 / the text on screen
     size_t line_off[ANKI_LINE_MAX];        ///< 行首在 text 中的字节偏移 / byte offset of each line
     size_t line_len[ANKI_LINE_MAX];        ///< 行字节数 / byte length of each line
-    bool line_bold[ANKI_LINE_MAX];         ///< 该行是否黑色加粗绘制 / draw this line in black bold
+    bool line_invert[ANKI_LINE_MAX];       ///< 该行是否反色绘制 / draw this line inverted
     uint16_t line_height[ANKI_LINE_MAX];   ///< 行高（像素）/ line height in pixels
     uint8_t line_x[ANKI_LINE_MAX];         ///< 行首缩进（0 = 左边距）/ left indent, 0 = margin
     int text_px;                           ///< 排版实际字号 / the size the layout settled on
@@ -219,39 +203,13 @@ static size_t utf8_prev_start(const char* s, size_t at) {
     return p > 0 ? p - 1 : 0;
 }
 
-// 段内测量统一口径：普通段按当前字重测量；粗体段临时切 700 再测，测完
-// 恢复，绝不把字重泄漏到后续段落或其它页面。TTF 的 wght 轴会改变 advance，
-// 若按常规字重测量、按 700 绘制，粗体行会超宽或折行错位。内建位图字体
-// 没有字重轴，降级为水平 1px 双描边（advance 不变，右侧多 1px 墨迹），
-// 故其测量宽度也 +1，与绘制严格对齐。
-// One measurement path for both: plain segments use the current weight,
-// bold ones switch to 700 for the measurement and restore it afterwards, so
-// the weight never leaks into another segment or page. The TTF wght axis
-// changes advances, so measuring at the regular weight would make a bold
-// line draw wider than measured and wrap in the wrong place. The built-in
-// bitmap face has no weight axis and degrades to a 1px horizontal double
-// strike (same advance, 1px more ink on the right), so its measured width
-// gets the same +1.
-static inline int seg_measure_px(int px, const char* text, bool bold) {
-    if (!bold) return ui_text_fixed_width_px(px, text);
-    if (ui_text_uses_builtin(text))
-        return ui_text_fixed_width_px(px, text) + (text && *text ? 1 : 0);
-    const int saved = ttf_get_weight();
-    ttf_set_weight(ANKI_BOLD_WGHT);
-    const int width = ui_text_fixed_width_px(px, text);
-    ttf_set_weight(saved);
-    return width;
-}
-
-// 前 n 字节的显示宽度（用行内探测缓冲，与该段是否加粗同一口径）。
-// Display width of the first n bytes, measured with the line's probe buffer
-// and the segment's own bold/normal metric.
-static int seg_width_px(const char* seg, size_t n, int px, bool bold,
-                        char* probe, size_t cap) {
+// 前 n 字节的显示宽度（用行内探测缓冲）。
+// Display width of the first n bytes, measured with the line's probe buffer.
+static int seg_width_px(const char* seg, size_t n, int px, char* probe, size_t cap) {
     if (n > cap - 1) n = cap - 1;
     memcpy(probe, seg, n);
     probe[n] = 0;
-    return seg_measure_px(px, probe, bold);
+    return ui_text_fixed_width_px(px, probe);
 }
 
 // 切点避头尾：闭符号不落行首、开符号不落行尾。拉得动就把符号拉进本行，
@@ -259,8 +217,8 @@ static int seg_width_px(const char* seg, size_t n, int px, bool bold,
 // Break-point rules: a closing mark never starts a line and an opening mark
 // never ends one. A mark that fits moves onto this line; one that does not
 // pushes the line's last character to the next line so the mark keeps company.
-static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px, bool bold,
-                            int avail, char* probe, size_t cap) {
+static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px, int avail,
+                            char* probe, size_t cap) {
     const size_t original = cut;
     for (int guard = 0; guard < 16; ++guard) {
         // 行尾禁则 / line-tail rule
@@ -273,7 +231,7 @@ static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px,
                 const bool has_next = cut < seg_len;
                 if (has_next) utf8_decode(seg + cut, seg_len - cut, &next_len);
                 if (has_next && cut + next_len < cap &&
-                    seg_width_px(seg, cut + next_len, px, bold, probe, cap) <= avail) {
+                    seg_width_px(seg, cut + next_len, px, probe, cap) <= avail) {
                     cut += next_len;  // 下一个字符拉进本行 / pull the next character in
                     continue;
                 }
@@ -286,7 +244,7 @@ static size_t cjk_fix_break(const char* seg, size_t cut, size_t seg_len, int px,
             size_t used = 0;
             const uint32_t cp = utf8_decode(seg + cut, seg_len - cut, &used);
             if (used > 0 && cjk_closing(cp)) {
-                if (cut + used < cap && seg_width_px(seg, cut + used, px, bold, probe, cap) <= avail) {
+                if (cut + used < cap && seg_width_px(seg, cut + used, px, probe, cap) <= avail) {
                     cut += used;  // 闭符号拉回本行末端 / pull the closing mark back
                     continue;
                 }
@@ -314,10 +272,10 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
     const char* text = L->text ? L->text : "";
     L->line_count = 0;
     L->line_page = 0;
-    // 加粗与缩进随折行全量赋值，这里再清零一遍，避免复用会话留下脏值。
-    // The bold and indent flags are fully assigned during wrapping; zero
+    // 反色与缩进随折行全量赋值，这里再清零一遍，避免复用会话留下脏值。
+    // The invert and indent flags are fully assigned during wrapping; zero
     // them here too so a reused session never keeps stale values.
-    memset(L->line_bold, 0, sizeof(L->line_bold));
+    memset(L->line_invert, 0, sizeof(L->line_invert));
     memset(L->line_x, 0, sizeof(L->line_x));
     const int width = ui_content_width();
     // 探测缓冲一次分配复用；候选长度先钳到容量内，测量永远是完整候选的
@@ -340,24 +298,38 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
         if (seg_len == 0) {
             L->line_off[L->line_count] = start;
             L->line_len[L->line_count] = 0;
-            L->line_bold[L->line_count] = false;
+            L->line_invert[L->line_count] = false;
             L->line_height[L->line_count] = (uint16_t)pitch;
             L->line_x[L->line_count] = 0;
             ++L->line_count;
             i = end + 1;
             continue;
         }
-        // 段首 \x01 是粗体标记：**整段**都要黑色加粗，不是只第一行。标记
-        // 在这里一次性吃掉（不占显示宽度），循环内每一行都继承它，折行后
-        // 仍然整段加粗；它也不会泄漏到下一段。
-        // A leading \x01 is the bold marker for the **whole segment**, not
-        // just its first line. Consumed here once (it takes no display
-        // width), every line of the segment inherits it, so a wrapped
-        // marked option stays bold on all of its lines, and it never leaks
-        // into the next segment.
-        bool seg_bold = false;
+        // 选项行首模式：可选 \x01 + 单个 ASCII 字母 + ". "；续行按前缀宽度悬挂。
+        // Option line head: an optional \x01 then one ASCII letter and ". ";
+        // continuations hang under that prefix.
+        int hang = 0;
+        {
+            size_t p = start;
+            if (p < end && text[p] == '\x01') ++p;
+            if (p + 2 < end && text[p + 1] == '.' && text[p + 2] == ' ' &&
+                ((text[p] >= 'A' && text[p] <= 'Z') || (text[p] >= 'a' && text[p] <= 'z'))) {
+                char prefix[4] = {text[p], '.', ' '};
+                prefix[3] = 0;
+                hang = ui_text_fixed_width_px(px, prefix);
+                if (hang > width / 2) hang = width / 2;
+                if (hang > 255) hang = 255;
+            }
+        }
+        // 段首 \x01 为强调标记：**整段**都要反色绘制，不是只第一行。标记在这里
+        // 一次性吃掉（不占显示宽度），循环内每一行都继承它，折行后仍然整段反色。
+        // A leading \x01 marks the **whole segment** as inverted, not just its
+        // first line. The marker is consumed here once (it takes no display
+        // width) and every line of the segment inherits it, so a wrapped
+        // marked option stays inverted on all of its lines.
+        bool seg_invert = false;
         if (seg_len > 0 && text[start] == '\x01') {
-            seg_bold = true;
+            seg_invert = true;
             ++start;
             --seg_len;
         }
@@ -367,23 +339,6 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
             // blank line.
             i = end + 1;
             continue;
-        }
-        // 选项行首模式：标记吃掉后是单个 ASCII 字母 + ". "；续行按前缀
-        // 宽度悬挂，前缀宽度按该段同一字重测量，绘制时才不会错位。
-        // Option line head: after the marker is consumed, one ASCII letter
-        // and ". "; continuations hang under that prefix, measured with the
-        // segment's own weight so draw and measurement agree.
-        int hang = 0;
-        {
-            size_t p = start;
-            if (p + 2 < end && text[p + 1] == '.' && text[p + 2] == ' ' &&
-                ((text[p] >= 'A' && text[p] <= 'Z') || (text[p] >= 'a' && text[p] <= 'z'))) {
-                char prefix[4] = {text[p], '.', ' '};
-                prefix[3] = 0;
-                hang = seg_measure_px(px, prefix, seg_bold);
-                if (hang > width / 2) hang = width / 2;
-                if (hang > 255) hang = 255;
-            }
         }
         bool seg_first = true;
         while (seg_len > 0 && L->line_count < ANKI_LINE_MAX) {
@@ -404,7 +359,7 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
                 const size_t mid = lo + (hi - lo) / 2;
                 memcpy(probe, text + start, mid);
                 probe[mid] = 0;
-                if (seg_measure_px(px, probe, seg_bold) <= avail) {
+                if (ui_text_fixed_width_px(px, probe) <= avail) {
                     take = mid;
                     lo = mid + 1;
                 } else {
@@ -435,11 +390,10 @@ static inline void anki_layout_build(anki_layout_t* L, int px, int pitch) {
             }
             // 避头尾：切点可能落在标点上，按禁则调整。
             // The cut may land on punctuation; the break rules settle it.
-            cut = cjk_fix_break(text + start, cut, seg_len, px, seg_bold, avail, probe,
-                                sizeof(probe));
+            cut = cjk_fix_break(text + start, cut, seg_len, px, avail, probe, sizeof(probe));
             L->line_off[L->line_count] = start;
             L->line_len[L->line_count] = cut;
-            L->line_bold[L->line_count] = seg_bold;
+            L->line_invert[L->line_count] = seg_invert;
             L->line_height[L->line_count] = (uint16_t)pitch;
             L->line_x[L->line_count] = (uint8_t)indent;
             ++L->line_count;

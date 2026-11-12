@@ -10,7 +10,7 @@
 
 ## 🅰 本仓库新增：Anki 卡组学习（0.3.3-rc104.01）
 
-本仓库在官方 **rc104** 基础上移植了 Anki 卡组学习功能：导入 `.apkg` 后在设备上按 Anki 调度复习，支持单选/多选题的选项标注、正确答案黑色加粗（墨水屏看不到彩色，已弃用反色突出方案）、按字号与墨水屏分辨率自适应排版。rc104 沿用 `boards/<板型>/` 加 `-DKIIKO_BOARD=pico|metalio47` 的多板构建，Anki 与字体改动都在 Pico 板级视图里；本仓库只构建 Pico。
+本仓库在官方 **rc104** 基础上移植了 Anki 卡组学习功能：导入 `.apkg` 后在设备上按 Anki 调度复习，支持单选/多选题的选项标注、错误项反色、按字号与墨水屏分辨率自适应排版。rc104 沿用 `boards/<板型>/` 加 `-DKIIKO_BOARD=pico|metalio47` 的多板构建，Anki 与字体改动都在 Pico 板级视图里；本仓库只构建 Pico。
 
 - **网页刷机（本 fork 专属）**：<https://cyankirin.github.io/kiikoreader-anki/kiikoread-anki/> —— 用电脑上的 Chrome 或 Edge 通过 **HTTPS** 打开，数据线连接墨水屏，一次写入引导程序、分区表与应用。**默认保留数据**（不提示擦除），设置与阅读进度不会丢。页面是 `flash/anki/index.html`；清单与 bin 由 `tools/stage_anki_flash.py` 在每次部署前现场生成，逐个重算 size 与 SHA-256，因此发布的清单不会与发布的字节脱轨。
 - **固件下载**：固件随仓库提供 —— [`firmware/Read_Pico-0.3.3-rc104.01.bin`](firmware/Read_Pico-0.3.3-rc104.01.bin)（**当前可用来源**，只烧 0x10000 应用分区）。若本仓库的 **Releases** 页面发布了对应版本，优先使用 Release 附件（含版本说明）；需要回滚时可用 [`firmware/Read_Pico-0.3.3-rc103.01.bin`](firmware/Read_Pico-0.3.3-rc103.01.bin)、[`firmware/Read_Pico-0.3.3-rc102.01.bin`](firmware/Read_Pico-0.3.3-rc102.01.bin) 或 [`firmware/Read_Pico-0.3.3-rc100.02.bin`](firmware/Read_Pico-0.3.3-rc100.02.bin)。
