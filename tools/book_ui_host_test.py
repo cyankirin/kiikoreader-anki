@@ -976,23 +976,28 @@ int main(void) {
     }
     assert(on_key(&ctx,UI_KEY_2)==APP_REDRAW_PAGE&&!s_sort_menu&&s_view==BULK&&selected_count()==2);
 
-    // 主书架三模式菜单不穿透，保留管理中的升降序；导入返回原管理分页。
-    // Main sorting owns contacts, retains management direction settings, and import returns to its management page.
+    // 主书架四模式菜单不穿透、选档后面板保持打开（app 的 shelf_sort_gesture 自 rc106 起未变，rc107 误断言为关闭）。
+    // Main sorting owns contacts, keeps the panel open after picking a mode, and import returns to its management page.
     s_view=SHELF;test_shelf_style=5;s_batch_confirm=false;s_clear_confirm=false;s_scan_pending=false;
     EpdRect manage_header=shelf_manage_rect(),sort_header=shelf_sort_rect();
     assert(manage_header.x==420&&manage_header.x+manage_header.width<=sort_header.x);
     assert(!ui_rect_hit((EpdRect){24,79,326,74},manage_header.x,110));
-    const unsigned orders[]={1,5,0};
-    for(int i=0;i<3;++i){
-        s_shelf_order=orders[(i+1)%3];s_sort_menu=true;ctx.leaf=2;
+    const int sort_modes[]={1,2,0,3};            // 最近阅读 / 添加时间 / 书名 / 阅读进度
+    const unsigned sort_start[]={0,0,3,0};    // 与待选档不同，走默认方向分支
+    const unsigned sort_want[]={1,5,0,7};    // shelf_order_apply 的 0..7 编码
+    for(int i=0;i<4;++i){
+        s_shelf_order=sort_start[i];s_sort_menu=true;ctx.leaf=2;
         EpdRect row=shelf_sort_menu_rect(i);
         ui_gesture_event_t event={.type=UI_GESTURE_TAP,.x0=row.x+10,.y0=row.y+10,.x=row.x+12,.y=row.y+12};
-        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&!s_sort_menu&&s_shelf_order==orders[i]&&ctx.leaf==0);
-        assert(s_recent_sort==(i==0));
+        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
+               s_shelf_order==sort_want[i]&&ctx.leaf==0&&s_recent_sort==(sort_modes[i]==1));
+        // 重复点同一档保留既有方向，不回落到默认方向。
+        assert(shelf_sort_gesture(&ctx,&event)==APP_REDRAW_PAGE&&s_sort_menu&&
+               s_shelf_order==sort_want[i]);
     }
     s_shelf_order=3;s_sort_menu=true;
     ui_gesture_event_t same_sort={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=185};
-    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&!s_sort_menu);
+    shelf_sort_gesture(&ctx,&same_sort);assert(s_shelf_order==3&&s_sort_menu);/*重复点当前档：方向保留、面板不关*/
     s_sort_menu=true;ui_gesture_event_t crossing={.type=UI_GESTURE_TAP,.x0=410,.y0=185,.x=410,.y=275};
     shelf_sort_gesture(&ctx,&crossing);assert(!s_sort_menu&&s_shelf_order==3);
     s_sort_menu=true;crossing=(ui_gesture_event_t){.type=UI_GESTURE_TAP,.x0=150,.y0=700,.x=150,.y=700};
