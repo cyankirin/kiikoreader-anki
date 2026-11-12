@@ -2,22 +2,22 @@
   "schema": 1,
   "releases": [
     {
-      "version": "0.3.3-rc107.01",
-      "manifest": "releases/0.3.3-rc107.01/manifest.json",
+      "version": "0.3.3-rc107.02",
+      "manifest": "releases/0.3.3-rc107.02/manifest.json",
       "label": "当前版本"
     },
     {
-      "version": "0.3.3-rc106.03",
+      "version": "0.3.3-rc107.01",
       "manifest": "releases/0.3.3-rc106.03/manifest.json",
       "label": "上一个版本"
     },
     {
-      "version": "0.3.3-rc106.02",
+      "version": "0.3.3-rc106.03",
       "manifest": "releases/0.3.3-rc106.02/manifest.json",
       "label": "可回退版本"
     },
     {
-      "version": "0.3.3-rc106.01",
+      "version": "0.3.3-rc106.02",
       "manifest": "releases/0.3.3-rc106.01/manifest.json",
       "label": "可回退版本"
     }
