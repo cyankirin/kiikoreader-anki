@@ -8,17 +8,17 @@
     },
     {
       "version": "0.3.3-rc107.01",
-      "manifest": "releases/0.3.3-rc106.03/manifest.json",
+      "manifest": "releases/0.3.3-rc107.01/manifest.json",
       "label": "上一个版本"
     },
     {
       "version": "0.3.3-rc106.03",
-      "manifest": "releases/0.3.3-rc106.02/manifest.json",
+      "manifest": "releases/0.3.3-rc106.03/manifest.json",
       "label": "可回退版本"
     },
     {
       "version": "0.3.3-rc106.02",
-      "manifest": "releases/0.3.3-rc106.01/manifest.json",
+      "manifest": "releases/0.3.3-rc106.02/manifest.json",
       "label": "可回退版本"
     }
   ]
