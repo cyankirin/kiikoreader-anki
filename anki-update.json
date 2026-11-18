@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "version": "0.3.3-rc108.02",
+  "project": "Read_Pico",
+  "board": "RDP-G01-W",
+  "layout": "pico-dual-4m-v1",
+  "minimum_base_version": "0.3.3-rc72",
+  "url": "https://cyankirin.github.io/kiikoreader-anki/Pico-anki-0.3.3-rc108.02.bin",
+  "size": 4164384,
+  "sha256": "094eb6e1de594d73edebc2a68ee69aa80f156cc5fe2b768e2b26d41bddcc687a",
+  "notes": "在线升级支持同基线原版：官方通道发现大版本一致的原版（本机 rc108.01 vs 官方 rc108）时提供升级入口，下载前弹窗确认；修复官方通道同基线被误报「已并入，无需升级」。"
+}
